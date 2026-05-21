@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // MrWiseMax — Chat System
 // Depends on: window.db, window.App, window.UI
 // ============================================================
@@ -13,6 +13,7 @@ const Chat = (() => {
   let activeOtherUser = null;
   let contactFilter = 'all';
   let contactSearch = '';
+  let pinnedContactId = localStorage.getItem('mrwisemax_pinned_contact') || null;
   let timeUpdateInterval = null;
 
   // One WebSocket channel per conversation (conv_id → channel)
@@ -275,12 +276,13 @@ const Chat = (() => {
     contacts.forEach(c => {
       const p = c.profile;
       if (!p) return;
+      const conv = conversations.find(cv => cv.otherProfile?.id === p.id);
+      if (!conv) return;
       if (query && !p.username?.toLowerCase().includes(query) && !(p.nickname || '').toLowerCase().includes(query)) return;
       if (contactFilter !== 'all' && c.category !== contactFilter) return;
       if (seen.has(p.id)) return;
       seen.add(p.id);
-      const conv = conversations.find(cv => cv.otherProfile?.id === p.id);
-      items.push({ profile: p, category: c.category, lastMessage: conv?.lastMessage || null, convId: conv?.id || null });
+      items.push({ profile: p, category: c.category, lastMessage: conv.lastMessage, convId: conv.id });
     });
 
     conversations.forEach(cv => {
@@ -292,6 +294,10 @@ const Chat = (() => {
       items.push({ profile: p, category: 'general', lastMessage: cv.lastMessage, convId: cv.id });
     });
 
+    if (pinnedContactId) {
+      const pi = items.findIndex(i => i.profile.id === pinnedContactId);
+      if (pi > 0) items.unshift(items.splice(pi, 1)[0]);
+    }
     if (!items.length) {
       el.innerHTML = `<div class="chat-empty-contacts">
         ${query ? `No contacts match "${query}"` : 'No conversations yet.<br>Search for a user to start chatting.'}
@@ -320,19 +326,25 @@ const Chat = (() => {
                 : (lmMe ? 'You: ' : '') + (lm.content || '').slice(0, 40) + ((lm.content || '').length > 40 ? '…' : '')
         : 'Say hello!';
 
-      return `<div class="chat-contact-item ${isActive ? 'active' : ''} ${hasUnread ? 'has-unread' : ''}"
+            const isPinned = item.profile.id === pinnedContactId;
+      return `<div class="chat-contact-item ${isActive ? 'active' : ''} ${hasUnread ? 'has-unread' : ''} ${isPinned ? 'pinned' : ''}"
+                   data-user-id="${p.id}"
+                   data-category="${item.category}"
+                   data-conv-id="${item.convId || ''}"
                    onclick="Chat.openConversationById('${p.id}')">
         <div class="chat-contact-avatar">${av ? `<img src="${av}" alt="${name}">` : UI.avatarInitials(name)}</div>
         <div class="chat-contact-info">
           <div class="chat-contact-top">
             <span class="chat-contact-name">${name}</span>
             ${isPrimary ? '<span class="chat-primary-badge">Primary</span>' : ''}
+            ${isPinned ? '<span class="chat-pin-badge">Pinned</span>' : ''}
           </div>
           <span class="chat-contact-last">${lastMsg}</span>
         </div>
         ${hasUnread ? '<span class="chat-unread-dot"></span>' : ''}
       </div>`;
     }).join('');
+    _wireContactListInteractions(el);
   }
 
   function renderChatPlaceholder() {
@@ -912,6 +924,9 @@ const Chat = (() => {
     copy: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect width="13" height="13" x="9" y="9" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
     edit: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
     delete: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
+    pin:         `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>`,
+    movePrimary: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+    moveGeneral: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>`,
   };
 
   function _showContextMenu(msgId, px, py) {
@@ -949,6 +964,120 @@ const Chat = (() => {
 
   function _hideContextMenu() {
     document.getElementById('chat-ctx-menu')?.remove();
+  }
+
+  // ── Contact-item long-press (wired once on the list container) ───────────
+
+  function _wireContactListInteractions(list) {
+    if (!list || list.dataset.contactInteractionsWired) return;
+    list.dataset.contactInteractionsWired = '1';
+
+    let clLpTimer = null;
+    let clDownX = 0, clDownY = 0;
+
+    list.addEventListener('pointerdown', e => {
+      const item = e.target.closest('.chat-contact-item');
+      if (!item) return;
+      clDownX = e.clientX; clDownY = e.clientY;
+      const px = e.clientX, py = e.clientY;
+      clearTimeout(clLpTimer);
+      clLpTimer = setTimeout(() => {
+        clLpTimer = null;
+        navigator.vibrate?.(40);
+        _showContactContextMenu(
+          item.dataset.userId, item.dataset.category,
+          item.dataset.convId || null, px, py
+        );
+      }, 500);
+    });
+
+    list.addEventListener('pointermove', e => {
+      if (!clLpTimer) return;
+      if (Math.abs(e.clientX - clDownX) > 10 || Math.abs(e.clientY - clDownY) > 10) {
+        clearTimeout(clLpTimer); clLpTimer = null;
+      }
+    });
+
+    const cancelClLp = () => { clearTimeout(clLpTimer); clLpTimer = null; };
+    list.addEventListener('pointerup', cancelClLp);
+    list.addEventListener('pointercancel', cancelClLp);
+  }
+
+  // ── Contact context menu ─────────────────────────────────────────────────
+
+  function _showContactContextMenu(userId, category, convId, px, py) {
+    _hideContextMenu();
+    const isPinned = pinnedContactId === userId;
+
+    const actions = [
+      {
+        icon: CTX_ICONS.pin,
+        label: isPinned ? 'Unpin' : 'Pin on top',
+        fn: isPinned ? 'Chat.unpinContact()' : `Chat.pinContact('${userId}')`,
+        danger: false,
+      },
+    ];
+
+    if (convId) {
+      if (category === 'primary') {
+        actions.push({ icon: CTX_ICONS.moveGeneral, label: 'Move to General', fn: `Chat.setCategory('${userId}','general')`, danger: false });
+      } else {
+        actions.push({ icon: CTX_ICONS.movePrimary, label: 'Move to Primary', fn: `Chat.setCategory('${userId}','primary')`, danger: false });
+      }
+      actions.push({ icon: CTX_ICONS.delete, label: 'Delete', fn: `Chat.deleteConversation('${convId}','${userId}')`, danger: true });
+    }
+
+    const menu = document.createElement('div');
+    menu.id = 'chat-ctx-menu';
+    menu.innerHTML = actions.map(a =>
+      `<button class="chat-ctx-item${a.danger ? ' danger' : ''}"
+               onclick="${a.fn};Chat._hideContextMenu()">${a.icon}${a.label}</button>`
+    ).join('');
+    document.body.appendChild(menu);
+
+    const mw = 188, mh = actions.length * 44 + 8;
+    let lx = px - mw / 2;
+    let ly = py - mh - 10;
+    lx = Math.max(8, Math.min(lx, window.innerWidth - mw - 8));
+    ly = Math.max(8, Math.min(ly, window.innerHeight - mh - 8));
+    menu.style.left = lx + 'px';
+    menu.style.top  = ly + 'px';
+
+    requestAnimationFrame(() => menu.classList.add('open'));
+    setTimeout(() => document.addEventListener('click', _hideContextMenu, { once: true }), 80);
+  }
+
+  // ── Pin / Unpin ──────────────────────────────────────────────────────────
+
+  function pinContact(userId) {
+    pinnedContactId = userId;
+    localStorage.setItem('mrwisemax_pinned_contact', userId);
+    renderContactList();
+  }
+
+  function unpinContact() {
+    pinnedContactId = null;
+    localStorage.removeItem('mrwisemax_pinned_contact');
+    renderContactList();
+  }
+
+  // ── Delete conversation ──────────────────────────────────────────────────
+
+  async function deleteConversation(convId, userId) {
+    UI.confirm('Delete this conversation? This cannot be undone.', async () => {
+      const { error } = await db.from('conversations').delete().eq('id', convId);
+      if (error) { UI.toast('Could not delete conversation.', 'error'); return; }
+
+      conversations = conversations.filter(c => c.id !== convId);
+      if (activeConvId === convId) closeChat();
+      if (pinnedContactId === userId) unpinContact();
+
+      const ch = convChannels.get(convId);
+      if (ch) { ch.unsubscribe(); convChannels.delete(convId); }
+
+      renderContactList();
+      UI.toast('Conversation deleted.', 'success');
+    }, true);
   }
 
   // ── Long-press + swipe wiring ─────────────────────────────
@@ -1691,6 +1820,7 @@ const Chat = (() => {
     // Message actions (called from inline onclick handlers)
     replyTo, cancelReply, scrollToMsg,
     copyMsg, editMsg, _saveEdit, _cancelEdit, deleteMsg,
+    pinContact, unpinContact, deleteConversation,
     toggleRecording, triggerFileInput, handleFileSelect,
     openImageViewer, _hideContextMenu, _toggleAudio,
   };

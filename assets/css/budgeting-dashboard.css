@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    MrWiseMax — Dashboard Styles
    ============================================================ */
 
@@ -2541,6 +2541,21 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   border-radius: 100px;
   font-weight: 700;
   flex-shrink: 0;
+}
+
+.chat-pin-badge {
+  font-size: 0.6rem;
+  background: rgba(100, 160, 255, 0.15);
+  color: #6ab0ff;
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.chat-contact-item.pinned {
+  border-left: 3px solid var(--primary);
+  padding-left: 11px;
 }
 
 .chat-empty-contacts {

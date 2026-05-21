@@ -7,7 +7,12 @@
 // lets the browser navigate away normally.
 //
 // Also intercepts back when a modal is open: closes the modal
-// first, then keeps the guard in place for the next press.
+// first, then resets the guard for the next press.
+//
+// How the two-entry stack works:
+//   history: [...prev_pages, {sentinel}, {guard}]   ← guard is current
+//   Back press → arrive at {sentinel} → show toast, push {guard} back
+//   Back press again (within 2.5 s) → arrive at {sentinel} → exit
 //
 // Usage (one-time setup per page):
 //   NavHistory.init()
@@ -74,9 +79,9 @@ const NavHistory = (() => {
         const isOpen  = el.classList.contains('modal-open');
 
         if (isOpen && !wasOpen && !handlingPop && !handlingModalClose) {
-          // Modal opened → push a modal entry on top of the sentinel
+          // Modal opened → push a modal entry on top of the guard
           hasModalInHistory = true;
-          history.pushState({ navSentinel: true, navModal: el.id }, '');
+          history.pushState({ navType: 'modal', navModal: el.id }, '');
 
         } else if (!isOpen && wasOpen && hasModalInHistory && !handlingPop && !handlingModalClose) {
           // Modal closed by normal UI (not back button) → consume modal entry
@@ -96,35 +101,37 @@ const NavHistory = (() => {
 
   // ── Popstate Handler ────────────────────────────────────────
   function handlePop(e) {
-    if (!e.state || !e.state.navSentinel) return;
+    if (!e.state || !e.state.navType) return;
 
-    // ① Modal entry — close the modal, restore the sentinel
-    if (e.state.navModal) {
-      handlingPop        = true;
-      hasModalInHistory  = false;
-      handlingModalClose = true;
-      if (typeof UI !== 'undefined') UI.closeAllModals();
-      handlingModalClose = false;
-      handlingPop        = false;
-      // Keep the guard in place for the next back press
-      history.pushState({ navSentinel: true }, '');
+    // ① Arrived at guard — came back from a modal entry via back button
+    if (e.state.navType === 'guard') {
+      if (hasModalInHistory) {
+        handlingPop        = true;
+        hasModalInHistory  = false;
+        handlingModalClose = true;
+        if (typeof UI !== 'undefined') UI.closeAllModals();
+        handlingModalClose = false;
+        handlingPop        = false;
+      }
       return;
     }
 
-    // ② Sentinel entry — show toast or allow exit
-    if (pendingExit) {
-      // Second press within the timeout → let the browser navigate away
-      clearTimeout(exitTimer);
-      document.getElementById('nav-exit-toast')?.remove();
-      pendingExit = false;
-      history.back();
-      return;
-    }
+    // ② Arrived at sentinel — user backed past the guard
+    if (e.state.navType === 'sentinel') {
+      if (pendingExit) {
+        // Second press within the timeout → let the browser navigate away
+        clearTimeout(exitTimer);
+        document.getElementById('nav-exit-toast')?.remove();
+        pendingExit = false;
+        history.back();
+        return;
+      }
 
-    // First press → show toast, stay on the page
-    pendingExit = true;
-    showExitToast();
-    history.pushState({ navSentinel: true }, '');
+      // First press → show toast, restore the guard so the page stays put
+      pendingExit = true;
+      showExitToast();
+      history.pushState({ navType: 'guard' }, '');
+    }
   }
 
   // ── Public API ──────────────────────────────────────────────
@@ -132,7 +139,10 @@ const NavHistory = (() => {
   // Call once on DOMContentLoaded (or page load).
   // Works on any page — no arguments needed.
   function init() {
-    history.replaceState({ navSentinel: true }, '');
+    // Two-entry stack: sentinel anchors the bottom, guard sits on top.
+    // Pressing back moves from guard → sentinel, which we catch and handle.
+    history.replaceState({ navType: 'sentinel' }, '');
+    history.pushState({ navType: 'guard' }, '');
     window.addEventListener('popstate', handlePop);
     initModalObserver();
   }

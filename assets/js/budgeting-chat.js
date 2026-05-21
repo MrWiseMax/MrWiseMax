@@ -14,6 +14,9 @@ const Chat = (() => {
   let contactFilter = 'all';
   let contactSearch = '';
   let pinnedContactId = localStorage.getItem('mrwisemax_pinned_contact') || null;
+  const blockedByMe     = new Set();
+  const blockedByOthers = new Set();
+  const mutedUserIds    = new Set(JSON.parse(localStorage.getItem('mrwisemax_muted_users') || '[]'));
   let timeUpdateInterval = null;
 
   // One WebSocket channel per conversation (conv_id → channel)
@@ -167,7 +170,7 @@ const Chat = (() => {
   }
 
   async function init() {
-    await Promise.all([loadContacts(), loadConversations()]);
+    await Promise.all([loadContacts(), loadConversations(), loadBlocks()]);
     renderContactList();
     renderChatPlaceholder();
     wireSearchInput();
@@ -233,6 +236,18 @@ const Chat = (() => {
       otherProfile: pMap[c.user1_id === uid ? c.user2_id : c.user1_id] || null,
       lastMessage: lastMsgMap[c.id] || null,
     }));
+  }
+
+  async function loadBlocks() {
+    const uid = App.user.id;
+    const [{ data: mine }, { data: byOthers }] = await Promise.all([
+      db.from('blocks').select('blocked_id').eq('blocker_id', uid),
+      db.from('blocks').select('blocker_id').eq('blocked_id', uid),
+    ]);
+    blockedByMe.clear();
+    blockedByOthers.clear();
+    (mine     || []).forEach(r => blockedByMe.add(r.blocked_id));
+    (byOthers || []).forEach(r => blockedByOthers.add(r.blocker_id));
   }
 
   // Loads up to PAGE_SIZE messages.
@@ -309,8 +324,12 @@ const Chat = (() => {
       const p = item.profile;
       const name = p.nickname || p.username || 'User';
       const av = p.avatar_url_storage || p.avatar_url;
+      const isBlockedByOther = blockedByOthers.has(p.id);
+      const isBlockedByMe = blockedByMe.has(p.id);
+      const isMuted = mutedUserIds.has(p.id);
+      const displayName = isBlockedByOther ? 'Unknown' : name;
       const isActive = item.convId === activeConvId;
-      const hasUnread = item.convId ? unreadPrimaryConvIds.has(item.convId) : false;
+      const hasUnread = item.convId && !isMuted && !isBlockedByOther ? unreadPrimaryConvIds.has(item.convId) : false;
       const isPrimary = item.category === 'primary';
       const lm = item.lastMessage;
       const lmMe = lm?.sender_id === uid;
@@ -332,12 +351,15 @@ const Chat = (() => {
                    data-category="${item.category}"
                    data-conv-id="${item.convId || ''}"
                    onclick="Chat.openConversationById('${p.id}')">
-        <div class="chat-contact-avatar">${av ? `<img src="${av}" alt="${name}">` : UI.avatarInitials(name)}</div>
+        <div class="chat-contact-avatar">${isBlockedByOther ? '<span class="chat-unknown-avatar">?</span>' : av ? `<img src="${av}" alt="${name}">` : UI.avatarInitials(name)}</div>
         <div class="chat-contact-info">
           <div class="chat-contact-top">
-            <span class="chat-contact-name">${name}</span>
+            <span class="chat-contact-name">${displayName}</span>
             ${isPrimary ? '<span class="chat-primary-badge">Primary</span>' : ''}
-            ${isPinned ? '<span class="chat-pin-badge">Pinned</span>' : ''}
+            ${isPinned       ? '<span class="chat-pin-badge">Pinned</span>'       : ''}
+            ${isMuted         ? '<span class="chat-muted-badge">Muted</span>'       : ''}
+            ${isBlockedByMe   ? '<span class="chat-blocked-badge">Blocked</span>'   : ''}
+            ${isBlockedByOther ? '<span class="chat-blocked-badge">Blocked you</span>' : ''}
           </div>
           <span class="chat-contact-last">${lastMsg}</span>
         </div>
@@ -363,8 +385,9 @@ const Chat = (() => {
 
     const messages = await loadMessages(activeConvId);
     const uid = App.user.id;
-    const name = activeOtherUser.nickname || activeOtherUser.username || 'User';
-    const av = activeOtherUser.avatar_url_storage || activeOtherUser.avatar_url;
+    const isBlockedByOther = blockedByOthers.has(activeOtherUser.id);
+    const name = isBlockedByOther ? 'Unknown' : (activeOtherUser.nickname || activeOtherUser.username || 'User');
+    const av   = isBlockedByOther ? null : (activeOtherUser.avatar_url_storage || activeOtherUser.avatar_url);
     const contact = contacts.find(c => c.contact_id === activeOtherUser.id);
     const category = contact?.category ?? 'primary';
 
@@ -391,10 +414,10 @@ const Chat = (() => {
           </svg>
         </button>
         <div class="chat-header-user" onclick="Chat.openConversationById('${activeOtherUser.id}')">
-          <div class="chat-header-avatar">${av ? `<img src="${av}" alt="${name}">` : UI.avatarInitials(name)}</div>
+          <div class="chat-header-avatar">${isBlockedByOther ? '<span class="chat-unknown-avatar">?</span>' : av ? `<img src="${av}" alt="${name}">` : UI.avatarInitials(name)}</div>
           <div>
             <span class="chat-header-name">${name}</span>
-            <span class="chat-header-handle">@${activeOtherUser.username}</span>
+            <span class="chat-header-handle">${isBlockedByOther ? '' : '@' + activeOtherUser.username}</span>
           </div>
         </div>
         <div class="chat-header-right">
@@ -927,6 +950,9 @@ const Chat = (() => {
     pin:         `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>`,
     movePrimary: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
     moveGeneral: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>`,
+    mute:        `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`,
+    unmute:      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
+    block:       `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`,
   };
 
   function _showContextMenu(msgId, px, py) {
@@ -974,6 +1000,7 @@ const Chat = (() => {
 
     let clLpTimer = null;
     let clDownX = 0, clDownY = 0;
+    let clLpFired = false;
 
     list.addEventListener('pointerdown', e => {
       const item = e.target.closest('.chat-contact-item');
@@ -983,6 +1010,8 @@ const Chat = (() => {
       clearTimeout(clLpTimer);
       clLpTimer = setTimeout(() => {
         clLpTimer = null;
+        clLpFired = true;
+        setTimeout(() => { clLpFired = false; }, 600);
         navigator.vibrate?.(40);
         _showContactContextMenu(
           item.dataset.userId, item.dataset.category,
@@ -997,6 +1026,13 @@ const Chat = (() => {
         clearTimeout(clLpTimer); clLpTimer = null;
       }
     });
+
+    // Absorb the mouseup-triggered click that fires right after long-press fires
+    list.addEventListener('click', e => {
+      if (!clLpFired) return;
+      clLpFired = false;
+      e.stopPropagation();
+    }, true);
 
     const cancelClLp = () => { clearTimeout(clLpTimer); clLpTimer = null; };
     list.addEventListener('pointerup', cancelClLp);
@@ -1026,6 +1062,19 @@ const Chat = (() => {
       }
       actions.push({ icon: CTX_ICONS.delete, label: 'Delete', fn: `Chat.deleteConversation('${convId}','${userId}')`, danger: true });
     }
+
+    const isMuted   = mutedUserIds.has(userId);
+    const isBlocked = blockedByMe.has(userId);
+    actions.push({
+      icon: isMuted ? CTX_ICONS.unmute : CTX_ICONS.mute,
+      label: isMuted ? 'Unmute' : 'Mute',
+      fn: isMuted ? `Chat.unmuteContact('${userId}')` : `Chat.muteContact('${userId}')`, danger: false,
+    });
+    actions.push({
+      icon: CTX_ICONS.block,
+      label: isBlocked ? 'Unblock' : 'Block',
+      fn: isBlocked ? `Chat.unblockContact('${userId}')` : `Chat.blockContact('${userId}')`, danger: !isBlocked,
+    });
 
     const menu = document.createElement('div');
     menu.id = 'chat-ctx-menu';
@@ -1079,6 +1128,49 @@ const Chat = (() => {
       UI.toast('Conversation deleted.', 'success');
     }, true);
   }
+
+  // ── Block / Unblock ─────────────────────────────────────────────────────
+
+  async function blockContact(userId) {
+    UI.confirm('Block this user? They will see you as "Unknown" and cannot find you in search.', async () => {
+      const { error } = await db.from('blocks').upsert(
+        [{ blocker_id: App.user.id, blocked_id: userId }],
+        { onConflict: 'blocker_id,blocked_id' }
+      );
+      if (error) { UI.toast('Could not block user.', 'error'); return; }
+      blockedByMe.add(userId);
+      renderContactList();
+      UI.toast('User blocked.', 'success');
+    }, true);
+  }
+
+  async function unblockContact(userId) {
+    const { error } = await db.from('blocks').delete()
+      .eq('blocker_id', App.user.id).eq('blocked_id', userId);
+    if (error) { UI.toast('Could not unblock user.', 'error'); return; }
+    blockedByMe.delete(userId);
+    renderContactList();
+    UI.toast('User unblocked.', 'success');
+  }
+
+  // ── Mute / Unmute (localStorage) ───────────────────────────────────────
+
+  function muteContact(userId) {
+    mutedUserIds.add(userId);
+    localStorage.setItem('mrwisemax_muted_users', JSON.stringify([...mutedUserIds]));
+    renderContactList();
+    UI.toast('Conversation muted.', 'success');
+  }
+
+  function unmuteContact(userId) {
+    mutedUserIds.delete(userId);
+    localStorage.setItem('mrwisemax_muted_users', JSON.stringify([...mutedUserIds]));
+    renderContactList();
+    UI.toast('Conversation unmuted.', 'success');
+  }
+
+  function getBlockedByOthers() { return blockedByOthers; }
+  function getBlockedByMe()     { return blockedByMe; }
 
   // ── Long-press + swipe wiring ─────────────────────────────
 
@@ -1821,6 +1913,8 @@ const Chat = (() => {
     replyTo, cancelReply, scrollToMsg,
     copyMsg, editMsg, _saveEdit, _cancelEdit, deleteMsg,
     pinContact, unpinContact, deleteConversation,
+    blockContact, unblockContact, muteContact, unmuteContact,
+    getBlockedByOthers, getBlockedByMe,
     toggleRecording, triggerFileInput, handleFileSelect,
     openImageViewer, _hideContextMenu, _toggleAudio,
   };

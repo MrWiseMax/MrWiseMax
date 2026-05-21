@@ -2558,6 +2558,40 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   padding-left: 11px;
 }
 
+.chat-muted-badge {
+  font-size: 0.6rem;
+  background: rgba(150, 150, 150, 0.18);
+  color: var(--text-muted);
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.chat-blocked-badge {
+  font-size: 0.6rem;
+  background: rgba(244, 67, 54, 0.12);
+  color: var(--danger, #f44336);
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Red ? avatar shown when the other user has blocked the current user */
+.chat-unknown-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 1.1rem;
+  font-weight: 900;
+  color: #fff;
+  background: #f44336;
+  border-radius: 50%;
+}
+
 .chat-empty-contacts {
   text-align: center;
   padding: 32px 16px;

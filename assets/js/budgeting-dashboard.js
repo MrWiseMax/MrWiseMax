@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // MrWiseMax — Dashboard Application Logic
 // ============================================================
 
@@ -1636,9 +1636,14 @@ async function renderUserSearchResults(query) {
   const { data, error } = await db.rpc('search_users', { query, limit_count: 8 });
   if (error || !data?.length) { el.innerHTML = ''; return; }
 
+  // Filter out users who have blocked me (they won't appear in my searches)
+  const _blocked = typeof Chat !== 'undefined' ? Chat.getBlockedByOthers() : new Set();
+  const visible  = data.filter(u => !_blocked.has(u.id));
+  if (!visible.length) { el.innerHTML = ''; return; }
+
   el.innerHTML = `
     <div class="user-search-header">People matching "${query}"</div>
-    ${data.map(u => {
+    ${visible.map(u => {
       const avatar = u.avatar_url_storage || u.avatar_url;
       const name   = u.nickname || u.username;
       return `<div class="user-search-card">

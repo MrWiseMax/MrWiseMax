@@ -1,29 +1,26 @@
 // ============================================================
-// NavHistory — SPA back-button navigation for MrWiseMax
+// NavHistory — SPA back-button exit guard for MrWiseMax
 // ============================================================
-// • Steps through in-app sections on back (instead of leaving the page)
-// • Shows "Tap again to exit" toast when the user backs past all sections
-// • Intercepts back on open modals — closes the modal first
+// Drop-in for any page. On back press the page stays exactly
+// as-is (no URL change, no view change). The user sees a
+// "Tap again to exit" toast; a second press within 2.5 s
+// lets the browser navigate away normally.
+//
+// Also intercepts back when a modal is open: closes the modal
+// first, then keeps the guard in place for the next press.
 //
 // Usage (one-time setup per page):
-//   NavHistory.init(initialSection, navigateFn)
+//   NavHistory.init()
 //
-// Usage (on every programmatic section navigation):
-//   NavHistory.push(section)
+// No other calls needed — push() is kept as a no-op so
+// existing call sites don't break.
 
 const NavHistory = (() => {
-  let navigateFn        = null;
-  let currentSection    = null;
-  let handlingPop       = false;
-  let handlingModalClose= false;
-  let ready             = false;
-
-  // "Tap again to exit" state
-  let pendingExit = false;
-  let exitTimer   = null;
-
-  // Track whether a modal history entry is currently in the stack
-  let hasModalInHistory = false;
+  let pendingExit        = false;
+  let exitTimer          = null;
+  let handlingPop        = false;
+  let handlingModalClose = false;
+  let hasModalInHistory  = false;
 
   // ── Exit Toast ──────────────────────────────────────────────
   function showExitToast() {
@@ -63,15 +60,13 @@ const NavHistory = (() => {
   }
 
   // ── Modal Tracking via MutationObserver ─────────────────────
-  // Watches for .modal-open additions/removals on .modal elements
-  // so back-button modal interception works without touching ui.js.
+  // Watches .modal elements for modal-open class changes so the
+  // back button closes an open modal before triggering the exit guard.
   function initModalObserver() {
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.type !== 'attributes' || mutation.attributeName !== 'class') continue;
         const el = mutation.target;
-
-        // Only care about elements that have the base .modal class
         if (!el.classList.contains('modal')) continue;
 
         const prevClasses = (mutation.oldValue || '').split(/\s+/);
@@ -79,12 +74,12 @@ const NavHistory = (() => {
         const isOpen  = el.classList.contains('modal-open');
 
         if (isOpen && !wasOpen && !handlingPop && !handlingModalClose) {
-          // Modal just opened — push a modal history entry
+          // Modal opened → push a modal entry on top of the sentinel
           hasModalInHistory = true;
-          history.pushState({ navSection: currentSection, navModal: el.id }, '');
+          history.pushState({ navSentinel: true, navModal: el.id }, '');
 
         } else if (!isOpen && wasOpen && hasModalInHistory && !handlingPop && !handlingModalClose) {
-          // Modal was closed by normal UI (not by back button) — consume the modal entry
+          // Modal closed by normal UI (not back button) → consume modal entry
           hasModalInHistory = false;
           history.back();
         }
@@ -92,36 +87,18 @@ const NavHistory = (() => {
     });
 
     observer.observe(document.body, {
-      subtree:         true,
-      attributes:      true,
-      attributeFilter: ['class'],
+      subtree:           true,
+      attributes:        true,
+      attributeFilter:   ['class'],
       attributeOldValue: true,
     });
   }
 
   // ── Popstate Handler ────────────────────────────────────────
   function handlePop(e) {
-    if (!e.state) return;
+    if (!e.state || !e.state.navSentinel) return;
 
-    // ① Exit sentinel — user backed past all app section history
-    if (e.state.navSection === '__exit__') {
-      if (pendingExit) {
-        // Second back within the timeout window → actually leave
-        clearTimeout(exitTimer);
-        document.getElementById('nav-exit-toast')?.remove();
-        pendingExit = false;
-        history.back();
-        return;
-      }
-      // First time hitting sentinel → show toast, restore position
-      pendingExit = true;
-      showExitToast();
-      // Push the current section back so the user stays in the app
-      history.pushState({ navSection: currentSection }, '');
-      return;
-    }
-
-    // ② Modal state — close the modal, stay on the current section
+    // ① Modal entry — close the modal, restore the sentinel
     if (e.state.navModal) {
       handlingPop        = true;
       hasModalInHistory  = false;
@@ -129,43 +106,39 @@ const NavHistory = (() => {
       if (typeof UI !== 'undefined') UI.closeAllModals();
       handlingModalClose = false;
       handlingPop        = false;
+      // Keep the guard in place for the next back press
+      history.pushState({ navSentinel: true }, '');
       return;
     }
 
-    // ③ Section state — navigate within the app
-    if (e.state.navSection) {
-      handlingPop    = true;
-      currentSection = e.state.navSection;
-      navigateFn(e.state.navSection);
-      handlingPop    = false;
+    // ② Sentinel entry — show toast or allow exit
+    if (pendingExit) {
+      // Second press within the timeout → let the browser navigate away
+      clearTimeout(exitTimer);
+      document.getElementById('nav-exit-toast')?.remove();
+      pendingExit = false;
+      history.back();
+      return;
     }
+
+    // First press → show toast, stay on the page
+    pendingExit = true;
+    showExitToast();
+    history.pushState({ navSentinel: true }, '');
   }
 
   // ── Public API ──────────────────────────────────────────────
 
-  // Call once on page load.
-  // Stamps an exit sentinel on the current history entry, then pushes
-  // the initial section on top so the first back press goes through
-  // sections before hitting the sentinel.
-  function init(initialSection, onNavigate) {
-    navigateFn     = onNavigate;
-    currentSection = initialSection;
-    ready          = true;
-
-    history.replaceState({ navSection: '__exit__' }, '');
-    history.pushState({ navSection: initialSection }, '');
-
+  // Call once on DOMContentLoaded (or page load).
+  // Works on any page — no arguments needed.
+  function init() {
+    history.replaceState({ navSentinel: true }, '');
     window.addEventListener('popstate', handlePop);
     initModalObserver();
   }
 
-  // Call on every programmatic navigation.
-  // No-op before init, during popstate handling, or on duplicate sections.
-  function push(section) {
-    if (!ready || handlingPop || section === currentSection) return;
-    currentSection = section;
-    history.pushState({ navSection: section }, '');
-  }
+  // No-op kept for call-site compatibility.
+  function push() {}
 
   return { init, push };
 })();

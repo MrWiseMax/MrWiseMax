@@ -1767,9 +1767,15 @@ select.input {
   height: 1.5rem;
 }
 
-.mobile-nav-item.active,
-.mobile-nav-item:hover {
+.mobile-nav-item.active {
   color: var(--primary);
+}
+
+/* Only apply :hover on real pointer devices — prevents ghost-hover on touch */
+@media (hover: hover) {
+  .mobile-nav-item:hover {
+    color: var(--primary);
+  }
 }
 
 /* ── Topbar Messages Button ──────────────────────────────── */

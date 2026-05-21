@@ -83,6 +83,7 @@ async function initDashboard() {
 
   initCurrencyInputs();
   navigateTo('overview');
+  NavHistory.init('overview', navigateTo);
   setupNavigation();
   setupFilterListeners();
   setupDynamicLayout();
@@ -114,6 +115,7 @@ function setupNavigation() {
 }
 
 function navigateTo(section) {
+  NavHistory.push(section);
   App.activeSection = section;
   UI.showSection(section);
   document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === section));

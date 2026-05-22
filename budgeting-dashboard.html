@@ -730,7 +730,10 @@
       </div>
       <div class="form-group">
         <label class="label">Category *</label>
-        <select class="input" id="tx-category"></select>
+        <div class="category-combo">
+          <input type="text" class="input" id="tx-category" placeholder="Type or select category…" autocomplete="off">
+          <div class="category-suggestions" id="tx-category-suggestions"></div>
+        </div>
       </div>
       <div class="form-group">
         <label class="label">Description (optional)</label>
@@ -924,14 +927,15 @@
         <button class="modal-close" onclick="UI.closeModal('recurring-modal')">✕</button>
       </div>
       <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:18px">
-        This will automatically post a transaction on the selected day every month (e.g. salary on the 1st, rent on the
+        This will automatically post a transaction on the selected day every month,
+        <br>(e.g. salary on the 1st, rent on the
         5th).
       </p>
       <div class="form-group">
         <label class="label">Type *</label>
         <select class="input" id="rec-type">
-          <option value="income">Income (salary, rent received, etc.)</option>
-          <option value="expense">Expense (rent, subscriptions, etc.)</option>
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
         </select>
       </div>
       <div class="input-row">
@@ -948,7 +952,10 @@
       </div>
       <div class="form-group">
         <label class="label">Category *</label>
-        <select class="input" id="rec-category"></select>
+        <div class="category-combo">
+          <input type="text" class="input" id="rec-category" placeholder="Type or select category…" autocomplete="off">
+          <div class="category-suggestions" id="rec-category-suggestions"></div>
+        </div>
       </div>
       <div class="form-group">
         <label class="label">Description (optional)</label>

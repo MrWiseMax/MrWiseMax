@@ -1460,6 +1460,42 @@ select.input {
   cursor: pointer;
 }
 
+.category-combo {
+  position: relative;
+}
+
+.category-suggestions {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--bg-card2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+  z-index: 200;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+
+.category-suggestions.open {
+  display: block;
+}
+
+.category-suggestion-item {
+  padding: 9px 13px;
+  font-size: 0.875rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--ease);
+}
+
+.category-suggestion-item:hover,
+.category-suggestion-item.active {
+  background: var(--primary);
+  color: #fff;
+}
+
 .color-input {
   width: 40px;
   height: 38px;

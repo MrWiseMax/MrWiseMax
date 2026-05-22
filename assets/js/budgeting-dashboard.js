@@ -552,14 +552,71 @@ function openEditTransaction(id) {
   UI.openModal('transaction-modal');
 }
 
+function initCategoryCombo(inputId, suggestionsId, categories, selected) {
+  const input = document.getElementById(inputId);
+  const box   = document.getElementById(suggestionsId);
+  if (!input || !box) return;
+
+  // Clone to remove stale listeners
+  const freshInput = input.cloneNode(true);
+  input.parentNode.replaceChild(freshInput, input);
+  const freshBox = box.cloneNode(false);
+  box.parentNode.replaceChild(freshBox, box);
+
+  freshInput.value = selected || '';
+
+  function showSuggestions(query) {
+    const q = query.trim().toLowerCase();
+    const matched = (q
+      ? categories.filter(c => c.name.toLowerCase().includes(q))
+      : categories
+    ).slice(0, 5);
+    if (!matched.length) { freshBox.classList.remove('open'); return; }
+    freshBox.innerHTML = matched.map(c =>
+      `<div class="category-suggestion-item" data-value="${c.name}">${c.name}</div>`
+    ).join('');
+    freshBox.classList.add('open');
+  }
+
+  freshInput.addEventListener('focus', () => showSuggestions(freshInput.value));
+  freshInput.addEventListener('input', () => showSuggestions(freshInput.value));
+  freshInput.addEventListener('keydown', e => {
+    const els    = freshBox.querySelectorAll('.category-suggestion-item');
+    const active = freshBox.querySelector('.category-suggestion-item.active');
+    let idx = [...els].indexOf(active);
+    if (e.key === 'ArrowDown')                { e.preventDefault(); idx = Math.min(idx + 1, els.length - 1); }
+    else if (e.key === 'ArrowUp')             { e.preventDefault(); idx = Math.max(idx - 1, 0); }
+    else if (e.key === 'Enter' && active)     { e.preventDefault(); freshInput.value = active.dataset.value; freshBox.classList.remove('open'); return; }
+    else if (e.key === 'Escape')              { freshBox.classList.remove('open'); return; }
+    else return;
+    els.forEach(i => i.classList.remove('active'));
+    if (els[idx]) els[idx].classList.add('active');
+  });
+
+  freshBox.addEventListener('mousedown', e => {
+    const item = e.target.closest('.category-suggestion-item');
+    if (!item) return;
+    e.preventDefault();
+    freshInput.value = item.dataset.value;
+    freshBox.classList.remove('open');
+  });
+
+  document.addEventListener('click', e => {
+    if (!freshInput.parentNode.contains(e.target)) freshBox.classList.remove('open');
+  });
+}
+
+const TX_CATEGORY_OPTIONS = {
+  expense: ['Online Shopping', 'Food & Drinks', 'Fixing Issue', 'Money Loan', 'Random'],
+  income:  ['Salary', 'Freelance', 'Investment Return', 'Gift', 'Other Income'],
+};
+
 function populateTxCategoryDropdown(selected) {
   const typeEl = document.getElementById('tx-type');
   const type   = typeEl?.value || 'expense';
-  const el     = document.getElementById('tx-category');
-  if (!el) return;
-  const filtered = App.categories.filter(c => c.type === type);
-  el.innerHTML = '<option value="">Select category…</option>' +
-    filtered.map(c => `<option value="${c.name}" ${c.name === selected ? 'selected' : ''}>${c.name}</option>`).join('');
+  const names  = TX_CATEGORY_OPTIONS[type] || TX_CATEGORY_OPTIONS.expense;
+  const items  = names.map(n => ({ name: n }));
+  initCategoryCombo('tx-category', 'tx-category-suggestions', items, selected);
 }
 
 async function saveTransaction() {
@@ -1557,12 +1614,15 @@ function openEditRecurring(id) {
   UI.openModal('recurring-modal');
 }
 
+const REC_CATEGORY_OPTIONS = {
+  expense: ['Rent / Mortgage', 'Utilities', 'Subscriptions', 'Insurance', 'Loan Payment'],
+  income:  ['Job Salary', 'Side Hustle', 'Online Service', 'Investment', 'Real Estate'],
+};
+
 function populateRecurringCategoryDropdown(type, selected) {
-  const el = document.getElementById('rec-category');
-  if (!el) return;
-  const filtered = App.categories.filter(c => c.type === type);
-  el.innerHTML = '<option value="">Select category…</option>' +
-    filtered.map(c => `<option value="${c.name}" ${c.name === selected ? 'selected' : ''}>${c.name}</option>`).join('');
+  const names = REC_CATEGORY_OPTIONS[type] || REC_CATEGORY_OPTIONS.expense;
+  const items = names.map(n => ({ name: n }));
+  initCategoryCombo('rec-category', 'rec-category-suggestions', items, selected);
 }
 
 async function saveRecurring() {

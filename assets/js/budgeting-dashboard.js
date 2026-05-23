@@ -22,6 +22,127 @@ const App = {
   communitySearch: '',
 };
 
+// ── Currency Configuration ────────────────────────────────────
+const CURRENCIES = [
+  { code: 'AUD', symbol: 'A$',  name: 'Australian Dollar',   flag: '🇦🇺' },
+  { code: 'BGN', symbol: 'лв',  name: 'Bulgarian Lev',       flag: '🇧🇬' },
+  { code: 'BRL', symbol: 'R$',  name: 'Brazilian Real',      flag: '🇧🇷' },
+  { code: 'CAD', symbol: 'CA$', name: 'Canadian Dollar',     flag: '🇨🇦' },
+  { code: 'CHF', symbol: 'Fr',  name: 'Swiss Franc',         flag: '🇨🇭' },
+  { code: 'CNY', symbol: '¥',   name: 'Chinese Yuan',        flag: '🇨🇳' },
+  { code: 'CZK', symbol: 'Kč',  name: 'Czech Koruna',        flag: '🇨🇿' },
+  { code: 'DKK', symbol: 'kr',  name: 'Danish Krone',        flag: '🇩🇰' },
+  { code: 'EUR', symbol: '€',   name: 'Euro',                flag: '🇪🇺' },
+  { code: 'GBP', symbol: '£',   name: 'British Pound',       flag: '🇬🇧' },
+  { code: 'HKD', symbol: 'HK$', name: 'Hong Kong Dollar',    flag: '🇭🇰' },
+  { code: 'HUF', symbol: 'Ft',  name: 'Hungarian Forint',    flag: '🇭🇺' },
+  { code: 'IDR', symbol: 'Rp',  name: 'Indonesian Rupiah',   flag: '🇮🇩' },
+  { code: 'ILS', symbol: '₪',   name: 'Israeli Shekel',      flag: '🇮🇱' },
+  { code: 'INR', symbol: '₹',   name: 'Indian Rupee',        flag: '🇮🇳' },
+  { code: 'ISK', symbol: 'kr',  name: 'Icelandic Króna',     flag: '🇮🇸' },
+  { code: 'JPY', symbol: '¥',   name: 'Japanese Yen',        flag: '🇯🇵' },
+  { code: 'KRW', symbol: '₩',   name: 'South Korean Won',    flag: '🇰🇷' },
+  { code: 'MXN', symbol: 'MX$', name: 'Mexican Peso',        flag: '🇲🇽' },
+  { code: 'MYR', symbol: 'RM',  name: 'Malaysian Ringgit',   flag: '🇲🇾' },
+  { code: 'NOK', symbol: 'kr',  name: 'Norwegian Krone',     flag: '🇳🇴' },
+  { code: 'NZD', symbol: 'NZ$', name: 'New Zealand Dollar',  flag: '🇳🇿' },
+  { code: 'PHP', symbol: '₱',   name: 'Philippine Peso',     flag: '🇵🇭' },
+  { code: 'PLN', symbol: 'zł',  name: 'Polish Zloty',        flag: '🇵🇱' },
+  { code: 'RON', symbol: 'lei', name: 'Romanian Leu',        flag: '🇷🇴' },
+  { code: 'SEK', symbol: 'kr',  name: 'Swedish Krona',       flag: '🇸🇪' },
+  { code: 'SGD', symbol: 'S$',  name: 'Singapore Dollar',    flag: '🇸🇬' },
+  { code: 'THB', symbol: '฿',   name: 'Thai Baht',           flag: '🇹🇭' },
+  { code: 'TRY', symbol: '₺',   name: 'Turkish Lira',        flag: '🇹🇷' },
+  { code: 'USD', symbol: '$',   name: 'US Dollar',           flag: '🇺🇸' },
+  { code: 'ZAR', symbol: 'R',   name: 'South African Rand',  flag: '🇿🇦' },
+];
+
+const CurrencySettings = {
+  main: CURRENCIES.find(c => c.code === 'USD'),
+  viewCurrency: 'main',   // 'main' | 'USD'
+  rateToUSD: 1,
+
+  get isUSDMode() {
+    return this.main.code !== 'USD' && this.viewCurrency === 'USD';
+  },
+
+  canEdit() {
+    if (this.isUSDMode) {
+      UI.toast('Go back to your main currency to make changes.', 'warning');
+      return false;
+    }
+    return true;
+  },
+
+  init() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('mrwisemax_currency') || 'null');
+      if (saved?.code) {
+        const found = CURRENCIES.find(c => c.code === saved.code);
+        if (found) this.main = found;
+      }
+      if (saved?.view === 'USD' && this.main.code !== 'USD') this.viewCurrency = 'USD';
+    } catch (_) {}
+    if (this.main.code !== 'USD') this._fetchRate(this.main.code);
+  },
+
+  async _fetchRate(code) {
+    try {
+      const cache = JSON.parse(localStorage.getItem('mrwisemax_rate_cache') || 'null');
+      if (cache?.code === code && cache.rate && (Date.now() - cache.ts) < 3600000) {
+        this.rateToUSD = cache.rate;
+        return;
+      }
+    } catch (_) {}
+    try {
+      // fawazahmed0 CDN — no auth, CORS-safe, updates daily
+      const res  = await fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${code.toLowerCase()}.json`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const rate = data[code.toLowerCase()]?.usd;
+      if (rate) {
+        this.rateToUSD = rate;
+        localStorage.setItem('mrwisemax_rate_cache', JSON.stringify({ code, rate, ts: Date.now() }));
+        if (App.activeSection === 'overview') renderOverview();
+      }
+    } catch (_) { this.rateToUSD = 1; }
+  },
+
+  save() {
+    localStorage.setItem('mrwisemax_currency', JSON.stringify({
+      code: this.main.code,
+      view: this.viewCurrency,
+    }));
+  },
+
+  toUSD(amount) { return parseFloat(amount || 0) * this.rateToUSD; },
+
+  _applyViewMode() { this.save(); updateCurrencyBanner(); },
+};
+
+// Patch UI.currency — apply USD conversion when in USD view mode
+(function () {
+  const _orig = UI.currency;
+  UI.currency = function (amount, forceSymbol) {
+    if (forceSymbol !== undefined) return _orig(amount, forceSymbol);
+    if (CurrencySettings.isUSDMode) return _orig(parseFloat(amount || 0) * CurrencySettings.rateToUSD, '$');
+    return _orig(amount, CurrencySettings.main.symbol);
+  };
+})();
+
+// Block edit-type modals when in USD view mode
+(function () {
+  const _origOpen = UI.openModal;
+  const EDIT_MODALS = new Set([
+    'transaction-modal', 'goal-modal', 'contribute-modal',
+    'plan-modal', 'recurring-modal', 'share-blueprint-modal',
+  ]);
+  UI.openModal = function (id) {
+    if (EDIT_MODALS.has(id) && !CurrencySettings.canEdit()) return;
+    _origOpen(id);
+  };
+})();
+
 // ── Currency Formatter ────────────────────────────────────────
 // Handles live comma-formatting for all dollar-amount inputs.
 // Inputs must have class="fmt-currency" and type="text".
@@ -74,6 +195,8 @@ async function initDashboard() {
     return;
   }
 
+  CurrencySettings.init();
+  updateCurrencyBanner();
   document.getElementById('page-loader').style.display = 'none';
   renderUserInfo();
 
@@ -254,6 +377,14 @@ function renderOverview() {
   setText('stat-expenses', UI.currency(expenses));
   setText('stat-savings',  UI.currency(savings));
   setText('stat-burn',     burnRate + '%');
+
+  // USD sub-values (shown only in main view when currency ≠ USD and rate is loaded)
+  const _showSub = !CurrencySettings.isUSDMode && CurrencySettings.main.code !== 'USD' && CurrencySettings.rateToUSD !== 1;
+  [['stat-income-sub', income], ['stat-expenses-sub', expenses], ['stat-savings-sub', savings]].forEach(([id, amt]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = _showSub ? `≈ ${UI.currency(CurrencySettings.toUSD(amt), '$')} USD` : '';
+  });
+
   renderHealthScore(score);
   renderExpensePieChart(thisMonth);
   renderTrendChart();
@@ -651,6 +782,7 @@ async function saveTransaction() {
 }
 
 async function deleteTransaction(id) {
+  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Delete this transaction? This cannot be undone.', async () => {
     const { error } = await db.from('transactions').delete().eq('id', id).eq('user_id', App.user.id);
     if (error) { UI.toast(error.message, 'error'); return; }
@@ -760,6 +892,7 @@ async function saveGoal() {
 }
 
 async function deleteGoal(id) {
+  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Delete this savings goal?', async () => {
     const { error } = await db.from('savings_goals').delete().eq('id', id).eq('user_id', App.user.id);
     if (error) { UI.toast(error.message, 'error'); return; }
@@ -967,6 +1100,7 @@ async function savePlan() {
 }
 
 async function duplicatePlan(id) {
+  if (!CurrencySettings.canEdit()) return;
   const p = App.plans.find(p => p.id === id);
   if (!p) return;
   const { error } = await db.from('budget_plans').insert([{
@@ -979,14 +1113,17 @@ async function duplicatePlan(id) {
   await loadPlans(); renderPlans();
 }
 async function archivePlan(id) {
+  if (!CurrencySettings.canEdit()) return;
   await db.from('budget_plans').update({ status: 'archived' }).eq('id', id).eq('user_id', App.user.id);
   await loadPlans(); renderPlans(); UI.toast('Plan archived.', 'info');
 }
 async function unarchivePlan(id) {
+  if (!CurrencySettings.canEdit()) return;
   await db.from('budget_plans').update({ status: 'active' }).eq('id', id).eq('user_id', App.user.id);
   await loadPlans(); renderPlans(); UI.toast('Plan restored.', 'success');
 }
 async function deletePlan(id) {
+  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Delete this budget plan?', async () => {
     await db.from('budget_plans').delete().eq('id', id).eq('user_id', App.user.id);
     UI.toast('Plan deleted.', 'success');
@@ -1650,12 +1787,14 @@ async function saveRecurring() {
 }
 
 async function toggleRecurring(id, isActive) {
+  if (!CurrencySettings.canEdit()) return;
   await db.from('recurring_transactions').update({ is_active: !isActive }).eq('id', id).eq('user_id', App.user.id);
   await loadRecurring(); renderRecurringList();
   UI.toast(isActive ? 'Paused.' : 'Resumed.', 'info');
 }
 
 async function deleteRecurring(id) {
+  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Remove this recurring entry? Future months will no longer be posted.', async () => {
     await db.from('recurring_transactions').delete().eq('id', id).eq('user_id', App.user.id);
     await loadRecurring(); renderRecurringList();
@@ -1719,6 +1858,151 @@ async function renderUserSearchResults(query) {
 
 // ── HELPERS ───────────────────────────────────────────────────
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
+
+// ── SETTINGS ─────────────────────────────────────────────────
+function updateCurrencyBanner() {
+  const banner = document.getElementById('usd-view-banner');
+  if (banner) banner.style.display = CurrencySettings.isUSDMode ? 'flex' : 'none';
+}
+
+function exitUSDMode() {
+  CurrencySettings.viewCurrency = 'main';
+  CurrencySettings._applyViewMode();
+  navigateTo(App.activeSection);
+  UI.toast(`Back to ${CurrencySettings.main.name} (${CurrencySettings.main.code})`, 'success');
+}
+
+function openCurrencySettingsModal() {
+  const searchEl = document.getElementById('currency-search-input');
+  if (searchEl) searchEl.value = '';
+  renderCurrencyStatusRow();
+  renderCurrencyList('');
+  UI.openModal('currency-modal');
+}
+
+function renderCurrencyStatusRow() {
+  const el = document.getElementById('currency-status-row');
+  if (!el) return;
+  const { main, viewCurrency, isUSDMode, rateToUSD } = CurrencySettings;
+  const usd = CURRENCIES.find(c => c.code === 'USD');
+
+  const rateNote = main.code !== 'USD' && rateToUSD !== 1
+    ? `<div class="cur-status-note">1 ${main.code} ≈ ${rateToUSD.toFixed(4)} USD</div>`
+    : '';
+
+  const mainCard = `
+    <div class="cur-status-card${!isUSDMode ? ' cur-status-active' : ''}">
+      <div class="cur-status-label">Main Currency</div>
+      <div class="cur-status-flag">${main.flag}</div>
+      <div class="cur-status-name">${main.name}</div>
+      <div class="cur-status-code">${main.code} <span class="cur-status-sym">${main.symbol}</span></div>
+      ${rateNote}
+    </div>`;
+
+  const usdCard = main.code !== 'USD' ? `
+    <div class="cur-status-card${isUSDMode ? ' cur-status-active' : ''}" style="cursor:pointer" onclick="selectCurrency('USD')">
+      <div class="cur-status-label">USD View</div>
+      <div class="cur-status-flag">${usd.flag}</div>
+      <div class="cur-status-name">${usd.name}</div>
+      <div class="cur-status-code">${usd.code} <span class="cur-status-sym">${usd.symbol}</span></div>
+      <div class="cur-status-usd">${isUSDMode ? 'Active · Read-only' : 'Click to preview'}</div>
+    </div>` : '';
+
+  el.innerHTML = mainCard + usdCard;
+}
+
+function renderCurrencyList(query) {
+  const el = document.getElementById('currency-options-list');
+  if (!el) return;
+  const q = query.trim().toLowerCase();
+  const list = q
+    ? CURRENCIES.filter(c => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q))
+    : CURRENCIES;
+  const mainCode   = CurrencySettings.main.code;
+  const activeCode = CurrencySettings.isUSDMode ? 'USD' : mainCode;
+
+  el.innerHTML = list.map(c => {
+    const isMain   = c.code === mainCode;
+    const isActive = c.code === activeCode;
+    const badges = [
+      isMain && isActive ? '<span class="cur-badge cur-badge-main">Main · Active</span>'
+        : isMain          ? '<span class="cur-badge cur-badge-main">Main</span>'
+        : isActive        ? '<span class="cur-badge cur-badge-active">Active</span>'
+        : '',
+    ].join('');
+    return `
+    <div class="currency-option${isActive ? ' selected' : ''}" onclick="selectCurrency('${c.code}')">
+      <span class="currency-flag">${c.flag}</span>
+      <span class="currency-name">${c.name}</span>
+      <div style="display:flex;align-items:center;gap:6px;margin-left:auto;flex-shrink:0">
+        ${badges}
+        <span class="currency-code">${c.code}</span>
+        <span class="currency-symbol">${c.symbol}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function filterCurrencies(value) { renderCurrencyList(value); }
+
+function selectCurrency(code) {
+  const found = CURRENCIES.find(c => c.code === code);
+  if (!found) return;
+
+  const main = CurrencySettings.main;
+
+  // No-op: clicking the already-active currency
+  if (code === main.code && !CurrencySettings.isUSDMode) return;
+  if (code === 'USD' && CurrencySettings.isUSDMode) return;
+
+  // Case 1: switching INTO USD view mode (main ≠ USD, clicking USD)
+  if (code === 'USD' && main.code !== 'USD') {
+    UI.confirm(
+      `Switch to USD view? Amounts will be shown converted at today's rate. Editing will be disabled until you switch back.`,
+      async () => {
+        UI.closeModal('currency-modal');
+        await CurrencySettings._fetchRate(main.code);
+        CurrencySettings.viewCurrency = 'USD';
+        CurrencySettings._applyViewMode();
+        navigateTo(App.activeSection);
+        UI.toast('USD view enabled. Editing is disabled.', 'info');
+      },
+      false
+    );
+    return;
+  }
+
+  // Case 2: switching back from USD view to main
+  if (CurrencySettings.isUSDMode && code === main.code) {
+    UI.closeModal('currency-modal');
+    CurrencySettings.viewCurrency = 'main';
+    CurrencySettings._applyViewMode();
+    navigateTo(App.activeSection);
+    UI.toast(`Back to ${main.name} (${main.code})`, 'success');
+    return;
+  }
+
+  // Case 3: changing the main currency
+  UI.confirm(
+    `Set ${found.name} (${found.code}) as your main currency? All amounts will be shown in ${found.symbol}.`,
+    async () => {
+      UI.closeModal('currency-modal');
+      CurrencySettings.main = found;
+      CurrencySettings.viewCurrency = 'main';
+      if (found.code !== 'USD') {
+        await CurrencySettings._fetchRate(found.code);
+      } else {
+        CurrencySettings.rateToUSD = 1;
+        localStorage.removeItem('mrwisemax_rate_cache');
+      }
+      CurrencySettings.save();
+      updateCurrencyBanner();
+      navigateTo(App.activeSection);
+      UI.toast(`Currency set to ${found.name} (${found.code})`, 'success');
+    },
+    false
+  );
+}
 
 // ── SIGN OUT ─────────────────────────────────────────────────
 function setupSignOut() {

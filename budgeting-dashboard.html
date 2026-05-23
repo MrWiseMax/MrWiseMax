@@ -56,6 +56,8 @@
 
       <div class="sidebar-bottom">
         <button class="nav-item" data-nav="profile"><span class="nav-icon">👤</span> Profile</button>
+        <button class="nav-item" onclick="openCurrencySettingsModal()"><span class="nav-icon">💱</span>
+          Currency</button>
         <button class="nav-item" id="signout-btn"><span class="nav-icon">🚪</span> Sign Out</button>
       </div>
     </aside>
@@ -64,8 +66,18 @@
     <div class="dash-main">
       <!-- Topbar -->
       <header class="topbar">
-        <div id="user-avatar-mobile-view" class="user-avatar" style="cursor:pointer" data-nav="profile" onclick="navigateTo('profile')"
-          title="Profile"></div>
+        <div style="display:flex;align-items:center;gap:15px">
+          <div id="user-avatar-mobile-view" class="user-avatar" style="cursor:pointer" data-nav="profile"
+            onclick="navigateTo('profile')" title="Profile"></div>
+          <button class="settings-gear-mobile" onclick="openCurrencySettingsModal()" title="Currency"
+            aria-label="Currency">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="1" x2="12" y2="23" />
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+          </button>
+        </div>
         <div class="topbar-actions">
           <button class="topbar-messages-btn" data-nav="messages" onclick="navigateTo('messages')" title="Messages">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -74,6 +86,12 @@
           </button>
         </div>
       </header>
+
+      <!-- USD View Mode Banner -->
+      <div id="usd-view-banner" class="usd-view-banner" style="display:none">
+        <span class="usd-banner-text">👁 USD view</span>
+        <button class="usd-banner-btn" onclick="exitUSDMode()">← Back to main currency</button>
+      </div>
 
       <!-- Content -->
       <main class="dash-content">
@@ -90,14 +108,17 @@
             <div class="stat-card">
               <div class="stat-card-label">Monthly Income</div>
               <div class="stat-card-value income" id="stat-income">$0.00</div>
+              <div class="stat-card-sub" id="stat-income-sub"></div>
             </div>
             <div class="stat-card">
               <div class="stat-card-label">Monthly Expenses</div>
               <div class="stat-card-value expense" id="stat-expenses">$0.00</div>
+              <div class="stat-card-sub" id="stat-expenses-sub"></div>
             </div>
             <div class="stat-card">
               <div class="stat-card-label">Net Savings</div>
               <div class="stat-card-value savings" id="stat-savings">$0.00</div>
+              <div class="stat-card-sub" id="stat-savings-sub"></div>
             </div>
             <div class="stat-card">
               <div class="stat-card-label">Burn Rate</div>
@@ -240,11 +261,13 @@
             <div class="sim-form">
               <div class="form-group">
                 <label class="label">Monthly Income ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-income" placeholder="e.g. 4,000">
+                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-income"
+                  placeholder="e.g. 4,000">
               </div>
               <div class="form-group">
                 <label class="label">Monthly Expenses ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-expenses" placeholder="e.g. 2,500">
+                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-expenses"
+                  placeholder="e.g. 2,500">
               </div>
               <div class="form-group">
                 <label class="label">Savings Rate (%)</label>
@@ -264,7 +287,8 @@
               </div>
               <div class="form-group">
                 <label class="label">Total Debt Balance ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-total-debt" placeholder="e.g. 15,000">
+                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-total-debt"
+                  placeholder="e.g. 15,000">
               </div>
               <div class="form-group">
                 <label class="label">Time Horizon (Years)</label>
@@ -342,7 +366,8 @@
             <div class="input-row" style="margin-top:14px">
               <div class="form-group" style="margin:0">
                 <label class="label">Monthly Income ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="compare-income" placeholder="e.g. 4,000">
+                <input type="text" inputmode="decimal" class="input fmt-currency" id="compare-income"
+                  placeholder="e.g. 4,000">
               </div>
               <div class="form-group" style="margin:0">
                 <label class="label">Compare Over (Years)</label>
@@ -965,6 +990,28 @@
         <button class="btn btn-ghost" onclick="UI.closeModal('recurring-modal')">Cancel</button>
         <button class="btn btn-primary" onclick="saveRecurring()">Save</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Currency Modal -->
+  <div class="modal" id="currency-modal">
+    <div class="modal-box" style="max-width:460px">
+      <div class="modal-header">
+        <h2>💱 Currency</h2>
+        <button class="modal-close" onclick="UI.closeModal('currency-modal')">✕</button>
+      </div>
+
+      <!-- Status row: main currency + active view -->
+      <div class="cur-status-row" id="currency-status-row"></div>
+
+      <!-- Currency search & list -->
+      <div class="form-group" style="margin:16px 0 8px">
+        <label class="label">Switch Main Currency</label>
+        <input type="text" class="input" id="currency-search-input" placeholder="Search by name or code…"
+          autocomplete="off" oninput="filterCurrencies(this.value)">
+      </div>
+      <div class="currency-options-list" id="currency-options-list"></div>
+
     </div>
   </div>
 

@@ -2245,7 +2245,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 /* ── Recurring Transactions ──────────────────────────────── */
 .recurring-row {
   display: grid;
-  grid-template-columns: 32px 1fr auto auto;
+  grid-template-columns: 32px 1fr auto;
   align-items: center;
   gap: 12px;
   padding: 11px 0;
@@ -2258,6 +2258,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .recurring-row.inactive {
   opacity: 0.45;
+}
+
+/* On desktop the footer is transparent — amount & actions sit as normal grid children */
+.recurring-footer {
+  display: contents;
 }
 
 .recurring-icon {
@@ -2321,6 +2326,40 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+}
+
+/* ── Recurring row — small screens ───────────────────────── */
+@media (max-width: 480px) {
+  .recurring-row {
+    grid-template-columns: 36px 1fr;
+    grid-template-areas:
+      "icon info"
+      "icon footer";
+    gap: 2px 10px;
+    padding: 13px 0;
+  }
+
+  .recurring-row .recurring-icon {
+    grid-area: icon;
+    align-self: center;
+  }
+
+  .recurring-row .recurring-info {
+    grid-area: info;
+  }
+
+  /* Footer becomes a real flex row containing amount + actions */
+  .recurring-footer {
+    display: flex;
+    grid-area: footer;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .recurring-footer .recurring-actions {
+    margin-left: auto;
+  }
 }
 
 .pause-btn {
@@ -3772,6 +3811,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   white-space: nowrap;
   transition: background var(--ease), border-color var(--ease);
   flex-shrink: 0;
+  line-height: 18px;
 }
 
 /* ── Currency Status Row (modal) ─────────────────────────── */

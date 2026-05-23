@@ -536,7 +536,7 @@ function renderTrendChart() {
       plugins: { legend: { labels: { color: '#ccc', font: { size: 12 } } } },
       scales: {
         x: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: 'rgba(255,255,255,0.04)' } }
+        y: { ticks: { color: '#888', callback: v => { const sym = CurrencySettings.isUSDMode ? '$' : CurrencySettings.main.symbol; return sym + v.toLocaleString(); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
       }
     }
   });
@@ -1713,11 +1713,13 @@ function renderRecurringList() {
         <span class="recurring-desc">${r.description || r.category}</span>
         <span class="recurring-meta">${r.category} · Day ${r.day_of_month} of each month</span>
       </div>
-      <span class="recurring-amount ${r.type}">${r.type === 'income' ? '+' : '-'}${UI.currency(r.amount)}</span>
-      <div class="recurring-actions">
-        <button class="icon-btn edit-btn" onclick="openEditRecurring('${r.id}')" title="Edit">✎</button>
-        <button class="icon-btn ${r.is_active ? 'pause-btn' : 'play-btn'}" onclick="toggleRecurring('${r.id}',${r.is_active})" title="${r.is_active ? 'Pause' : 'Resume'}">${r.is_active ? '⏸' : '▶'}</button>
-        <button class="icon-btn del-btn" onclick="deleteRecurring('${r.id}')" title="Delete">✕</button>
+      <div class="recurring-footer">
+        <span class="recurring-amount ${r.type}">${r.type === 'income' ? '+' : '-'}${UI.currency(r.amount)}</span>
+        <div class="recurring-actions">
+          <button class="icon-btn edit-btn" onclick="openEditRecurring('${r.id}')" title="Edit">✎</button>
+          <button class="icon-btn ${r.is_active ? 'pause-btn' : 'play-btn'}" onclick="toggleRecurring('${r.id}',${r.is_active})" title="${r.is_active ? 'Pause' : 'Resume'}">${r.is_active ? '⏸' : '▶'}</button>
+          <button class="icon-btn del-btn" onclick="deleteRecurring('${r.id}')" title="Delete">✕</button>
+        </div>
       </div>
     </div>`).join('');
 }

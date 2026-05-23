@@ -85,8 +85,10 @@ body {
 /* ── Layout ──────────────────────────────────────────────── */
 .dash-layout {
   display: flex;
-  height: 100vh;   /* fallback — JS overrides to visualViewport.height */
-  height: 100svh;  /* static safety net: small viewport never overflows browser chrome */
+  height: 100vh;
+  /* fallback — JS overrides to visualViewport.height */
+  height: 100svh;
+  /* static safety net: small viewport never overflows browser chrome */
   overflow: hidden;
 }
 
@@ -1016,7 +1018,8 @@ body {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
-  table-layout: fixed;  /* 3 columns share width evenly — no horizontal scroll */
+  table-layout: fixed;
+  /* 3 columns share width evenly — no horizontal scroll */
 }
 
 .compare-table th {
@@ -1036,7 +1039,9 @@ body {
 
 /* Label column is slightly wider than the two value columns */
 .compare-table th:first-child,
-.compare-table td:first-child  { width: 38%; }
+.compare-table td:first-child {
+  width: 38%;
+}
 
 .compare-table td {
   padding: 11px 12px;
@@ -1048,14 +1053,17 @@ body {
   white-space: nowrap;
 }
 
-.compare-table tr:last-child td { border: none; }
+.compare-table tr:last-child td {
+  border: none;
+}
 
 /* Metric label column — muted, normal weight */
 .compare-table td.compare-label {
   color: var(--text-muted);
   font-weight: 400;
   font-size: 0.82rem;
-  white-space: normal;    /* allow label to wrap rather than truncate */
+  white-space: normal;
+  /* allow label to wrap rather than truncate */
 }
 
 /* Winning value — highlighted green */
@@ -1065,10 +1073,18 @@ body {
 }
 
 @media (max-width: 768px) {
-  .compare-table { font-size: 0.82rem; }
+  .compare-table {
+    font-size: 0.82rem;
+  }
+
   .compare-table th,
-  .compare-table td { padding: 9px 10px; }
-  .compare-table td.compare-label { font-size: 0.78rem; }
+  .compare-table td {
+    padding: 9px 10px;
+  }
+
+  .compare-table td.compare-label {
+    font-size: 0.78rem;
+  }
 }
 
 /* ── Community / Blueprints ──────────────────────────────── */
@@ -1475,7 +1491,7 @@ select.input {
   border-radius: 9px;
   overflow: hidden;
   z-index: 200;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
 .category-suggestions.open {
@@ -3742,6 +3758,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .usd-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--info);
@@ -3753,11 +3772,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   white-space: nowrap;
   transition: background var(--ease), border-color var(--ease);
   flex-shrink: 0;
-}
-
-.usd-banner-btn:hover {
-  background: rgba(33, 150, 243, 0.25);
-  border-color: rgba(33, 150, 243, 0.5);
 }
 
 /* ── Currency Status Row (modal) ─────────────────────────── */

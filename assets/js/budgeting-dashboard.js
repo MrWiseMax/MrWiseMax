@@ -1891,8 +1891,9 @@ function renderCurrencyStatusRow() {
     : '';
 
   const mainCard = `
-    <div class="cur-status-card${!isUSDMode ? ' cur-status-active' : ''}">
-      <div class="cur-status-label">Main Currency</div>
+    <div class="cur-status-card${!isUSDMode ? ' cur-status-active' : ''}"
+      ${isUSDMode ? 'style="cursor:pointer" onclick="UI.closeModal(\'currency-modal\'); exitUSDMode();"' : ''}>
+      <div class="cur-status-label">Main Currency${isUSDMode ? ' — click to restore' : ''}</div>
       <div class="cur-status-flag">${main.flag}</div>
       <div class="cur-status-name">${main.name}</div>
       <div class="cur-status-code">${main.code} <span class="cur-status-sym">${main.symbol}</span></div>

@@ -1865,6 +1865,21 @@ function setText(id, value) { const el = document.getElementById(id); if (el) el
 function updateCurrencyBanner() {
   const banner = document.getElementById('usd-view-banner');
   if (banner) banner.style.display = CurrencySettings.isUSDMode ? 'flex' : 'none';
+  updateAmountLabels();
+}
+
+function updateAmountLabels() {
+  const sym = CurrencySettings.isUSDMode ? '$' : CurrencySettings.main.symbol;
+  const map = {
+    'lbl-tx-amount':        `Amount (${sym}) *`,
+    'lbl-goal-target':      `Target Amount (${sym}) *`,
+    'lbl-contribute-amount':`Amount (${sym})`,
+    'lbl-rec-amount':       `Amount (${sym}) *`,
+  };
+  Object.entries(map).forEach(([id, text]) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  });
 }
 
 function exitUSDMode() {

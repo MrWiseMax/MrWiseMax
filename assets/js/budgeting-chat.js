@@ -68,22 +68,80 @@ const Chat = (() => {
   // Runs every 15 s regardless of active section.
   // This is the primary unread-badge source — it reloads conversation
   // last-messages from the DB and compares them against the per-conversation
-  // last-read timestamps stored in localStorage. WebSocket events are a
-  // faster secondary update on top of this.
+  // last-read timestamps stored in localStorage AND Supabase profiles.
+  // WebSocket events are a faster secondary update on top of this.
   let badgePollInterval = null;
   const LAST_READ_KEY = 'mrwisemax_chat_last_read';
 
+  // In-memory last-read cache. Initialised from Supabase + localStorage on startup.
+  // null = not yet loaded; {} = loaded but empty.
+  let lastReadCache = null;
+
+  // Returns the current in-memory cache (falls back to localStorage if not yet initialised).
   function _getLastReadTimes() {
+    if (lastReadCache !== null) return lastReadCache;
     try { return JSON.parse(localStorage.getItem(LAST_READ_KEY) || '{}'); }
     catch (_) { return {}; }
   }
 
-  function _setLastReadTime(convId) {
+  // Loads last-read times from Supabase, merges with localStorage (most-recent wins),
+  // then seeds lastReadCache. Called once during initGlobal().
+  async function _initLastReadCache() {
+    // Step 1: read localStorage (synchronous, instant)
+    let local = {};
+    try { local = JSON.parse(localStorage.getItem(LAST_READ_KEY) || '{}'); } catch (_) {}
+
+    // Step 2: fetch from Supabase profiles.chat_last_read (survives history/cache wipes)
+    let remote = {};
     try {
-      const t = _getLastReadTimes();
-      t[convId] = new Date().toISOString();
-      localStorage.setItem(LAST_READ_KEY, JSON.stringify(t));
-    } catch (_) { }
+      const { data } = await db.from('profiles')
+        .select('chat_last_read')
+        .eq('id', App.user.id)
+        .single();
+      remote = data?.chat_last_read || {};
+    } catch (_) {
+      // Column may not exist yet — silently fall back to localStorage only
+    }
+
+    // Step 3: merge — for each conv take the most recent read timestamp
+    const merged = { ...local };
+    Object.entries(remote).forEach(([convId, ts]) => {
+      if (!merged[convId] || ts > merged[convId]) merged[convId] = ts;
+    });
+
+    lastReadCache = merged;
+
+    // Persist merged result back to localStorage so it's always in sync
+    try { localStorage.setItem(LAST_READ_KEY, JSON.stringify(lastReadCache)); } catch (_) {}
+  }
+
+  // Saves the given last-read map to Supabase profiles (fire-and-forget).
+  async function _saveLastReadToDB(times) {
+    try {
+      await db.from('profiles')
+        .update({ chat_last_read: times })
+        .eq('id', App.user.id);
+    } catch (_) {
+      // Silently ignore — DB save is best-effort; localStorage is the fallback
+    }
+  }
+
+  function _setLastReadTime(convId) {
+    const ts = new Date().toISOString();
+
+    // Ensure cache is initialised (it normally is by initGlobal, but guard anyway)
+    if (lastReadCache === null) {
+      try { lastReadCache = JSON.parse(localStorage.getItem(LAST_READ_KEY) || '{}'); }
+      catch (_) { lastReadCache = {}; }
+    }
+
+    lastReadCache[convId] = ts;
+
+    // Persist to localStorage (synchronous, always works)
+    try { localStorage.setItem(LAST_READ_KEY, JSON.stringify(lastReadCache)); } catch (_) {}
+
+    // Persist to Supabase asynchronously so it survives history/cache wipes
+    _saveLastReadToDB(lastReadCache);
   }
 
   // Recomputes unreadPrimaryConvIds from current conversations + localStorage.
@@ -159,7 +217,10 @@ const Chat = (() => {
 
   async function initGlobal() {
     try {
-      await Promise.all([loadContacts(), loadConversations()]);
+      // Load contacts, conversations, and last-read timestamps in parallel.
+      // _initLastReadCache() syncs localStorage with Supabase so the badge
+      // survives browser history / cache wipes between sessions.
+      await Promise.all([loadContacts(), loadConversations(), _initLastReadCache()]);
       _computeBadge();          // Seed badge immediately from DB state
       syncConvSubscriptions();  // Open one WebSocket channel per conversation
       subscribeToNewConversations();
@@ -1852,21 +1913,31 @@ const Chat = (() => {
   }
 
   function updateBadge() {
-    const btn = document.querySelector('.topbar-messages-btn');
     const count = unreadPrimaryConvIds.size;
 
-    if (!btn) {
-      console.warn('[Chat:Badge] .topbar-messages-btn not found in DOM — cannot update badge');
-      return;
+    // ── Mobile topbar button ──────────────────────────────────
+    const mobileBtn = document.querySelector('.topbar-messages-btn');
+    if (mobileBtn) {
+      mobileBtn.querySelector('.msg-badge')?.remove();
+      if (count > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'msg-badge';
+        badge.textContent = count > 99 ? '99+' : String(count);
+        mobileBtn.appendChild(badge);
+      }
     }
 
-    btn.querySelector('.msg-badge')?.remove();
-
-    if (count > 0) {
-      const badge = document.createElement('span');
-      badge.className = 'msg-badge';
-      badge.textContent = count > 99 ? '99+' : String(count);
-      btn.appendChild(badge);
+    // ── Desktop sidebar nav item ──────────────────────────────
+    // Target the .nav-item version (not the .topbar-messages-btn version)
+    const sidebarBtn = document.querySelector('.nav-item[data-nav="messages"]');
+    if (sidebarBtn) {
+      sidebarBtn.querySelector('.msg-badge')?.remove();
+      if (count > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'msg-badge';
+        badge.textContent = count > 99 ? '99+' : String(count);
+        sidebarBtn.appendChild(badge);
+      }
     }
   }
 

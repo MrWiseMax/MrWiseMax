@@ -242,6 +242,10 @@ function navigateTo(section) {
   UI.showSection(section);
   document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === section));
 
+  // Instantly snap the content area back to the top on every section switch
+  const dashContent = document.querySelector('.dash-content');
+  if (dashContent) dashContent.scrollTop = 0;
+
   // Others button active when simulate or compare is selected
   const othersBtn = document.getElementById('mobile-others-btn');
   if (othersBtn) othersBtn.classList.toggle('active', ['simulate', 'compare'].includes(section));
@@ -1079,9 +1083,53 @@ async function importTemplate(templateId) {
   }
 }
 
+// 6-month wealth projection (savings plain + investments compounded at 7% p.a.)
+function project6Months(allocations, income) {
+  const allocs = allocations || {};
+  const savPct = Object.entries(allocs).filter(([k]) => /saving/i.test(k)).reduce((s, [, v]) => s + +v.percentage, 0);
+  const invPct = Object.entries(allocs).filter(([k]) => /invest/i.test(k)).reduce((s, [, v]) => s + +v.percentage, 0);
+  const mSav = income * savPct / 100, mInv = income * invPct / 100, mRet = 0.07 / 12;
+  let sav = 0, inv = 0;
+  for (let m = 0; m < 6; m++) { sav += mSav; inv = (inv + mInv) * (1 + mRet); }
+  return sav + inv;
+}
+
 function planCard(p, archived = false) {
-  const allocs = Object.entries(p.allocations || {});
-  const total  = allocs.reduce((s, [, v]) => s + (+v.percentage || 0), 0);
+  // Always use live recurring income; fall back to stored value for legacy plans
+  const income  = getRecurringMonthlyIncome() || p.monthly_income || 0;
+  const allocs  = Object.entries(p.allocations || {});
+  const total   = allocs.reduce((s, [, v]) => s + (+v.percentage || 0), 0);
+  const unalloc = Math.max(0, 100 - total);
+
+  // Wealth projection (only shown when savings/investment categories exist)
+  const hasWealth = allocs.some(([k]) => /saving|invest/i.test(k));
+  let projHtml = '';
+  if (income > 0 && hasWealth) {
+    const p6m = project6Months(p.allocations, income);
+    const p1y = projectPlanWealth(p.allocations, income, 1)[0]?.total || 0;
+    const p2y = projectPlanWealth(p.allocations, income, 2)[1]?.total || 0;
+    projHtml = `
+      <div class="plan-projection-strip">
+        <div class="proj-header">📈 Wealth projection <span class="proj-note">(savings + investments @ 7% p.a.)</span></div>
+        <div class="proj-periods">
+          <div class="proj-period">
+            <span class="proj-label">6 months</span>
+            <span class="proj-value">${UI.currency(p6m)}</span>
+          </div>
+          <div class="proj-period">
+            <span class="proj-label">1 year</span>
+            <span class="proj-value">${UI.currency(p1y)}</span>
+          </div>
+          <div class="proj-period">
+            <span class="proj-label">2 years</span>
+            <span class="proj-value">${UI.currency(p2y)}</span>
+          </div>
+        </div>
+      </div>`;
+  } else if (income > 0 && !hasWealth) {
+    projHtml = `<div class="plan-projection-tip">💡 Name a category "Savings" or "Investment" to see wealth projections</div>`;
+  }
+
   return `<div class="plan-card ${archived ? 'archived' : ''}">
     <div class="plan-card-header">
       <div>
@@ -1090,16 +1138,39 @@ function planCard(p, archived = false) {
       </div>
       <span class="plan-status status-${p.status}">${p.status}</span>
     </div>
-    ${p.monthly_income > 0 ? `<div class="plan-income">Monthly Income: <strong>${UI.currency(p.monthly_income)}</strong></div>` : ''}
+
+    ${income > 0
+      ? `<div class="plan-income">Monthly income basis: <strong>${UI.currency(income)}/mo</strong></div>`
+      : `<div class="plan-income" style="color:var(--warning)">⚠ No recurring income — add one in Budget Vault</div>`}
+
     <div class="plan-allocations">
-      ${allocs.slice(0, 6).map(([name, v]) => `
+      ${allocs.map(([name, v]) => `
         <div class="alloc-item">
-          <div class="alloc-bar-track"><div class="alloc-bar-fill" style="width:${v.percentage}%;background:${v.color || '#BB885F'}"></div></div>
-          <span class="alloc-name">${name}</span>
-          <span class="alloc-pct">${v.percentage}%</span>
+          <div class="alloc-item-top">
+            <span class="alloc-name">${name}</span>
+            <span class="alloc-pct-amount">
+              <span class="alloc-pct">${(+v.percentage).toFixed(1)}%</span>
+              ${income > 0 ? `<span class="alloc-amt">${UI.currency(income * v.percentage / 100)}/mo</span>` : ''}
+            </span>
+          </div>
+          <div class="alloc-bar-track"><div class="alloc-bar-fill" style="width:${Math.min(+v.percentage, 100)}%;background:${v.color || '#BB885F'}"></div></div>
         </div>`).join('')}
-      ${total ? `<div class="alloc-total">Allocated: ${total}%</div>` : ''}
+      ${unalloc > 0.05 ? `
+        <div class="alloc-item alloc-unalloc-row">
+          <div class="alloc-item-top">
+            <span class="alloc-name alloc-unalloc-name">Unallocated</span>
+            <span class="alloc-pct-amount">
+              <span class="alloc-pct alloc-unalloc-pct">${unalloc.toFixed(1)}%</span>
+              ${income > 0 ? `<span class="alloc-amt">${UI.currency(income * unalloc / 100)}/mo</span>` : ''}
+            </span>
+          </div>
+          <div class="alloc-bar-track"><div class="alloc-bar-fill" style="width:${unalloc}%;background:rgba(255,255,255,0.08)"></div></div>
+        </div>` : ''}
+      <div class="alloc-total">Allocated: ${total.toFixed(1)}%${Math.abs(total - 100) < 0.1 ? ' ✓' : ''}</div>
     </div>
+
+    ${projHtml}
+
     <div class="plan-actions">
       <button class="btn btn-sm btn-outline" onclick="openEditPlan('${p.id}')">Edit</button>
       <button class="btn btn-sm btn-outline" onclick="duplicatePlan('${p.id}')">Duplicate</button>
@@ -1111,24 +1182,70 @@ function planCard(p, archived = false) {
   </div>`;
 }
 
+// Returns the total active recurring monthly income
+function getRecurringMonthlyIncome() {
+  return App.recurring
+    .filter(r => r.type === 'income' && r.is_active)
+    .reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
+}
+
+// Updates the income info banner inside the plan modal
+function updatePlanModalIncomeInfo() {
+  const el = document.getElementById('plan-modal-income-info');
+  if (!el) return;
+  const income = getRecurringMonthlyIncome();
+  if (income > 0) {
+    el.innerHTML = `💰 Plan is based on your recurring monthly income: <strong>${UI.currency(income)}/mo</strong>`;
+    el.className = 'plan-modal-income-info has-income';
+  } else {
+    el.innerHTML = `⚠ No active recurring income found. <span style="color:var(--primary);cursor:pointer;text-decoration:underline" onclick="UI.closeModal('plan-modal');navigateTo('vault')">Add one in Budget Vault</span> before creating a plan.`;
+    el.className = 'plan-modal-income-info no-income';
+  }
+}
+
+// Updates the live allocation total indicator
+function updateAllocTotal() {
+  const inputs = document.querySelectorAll('#allocation-rows .alloc-pct-input');
+  const total  = Array.from(inputs).reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
+  const pctEl  = document.getElementById('alloc-total-pct');
+  const wrap   = document.getElementById('alloc-total-display');
+  if (pctEl) pctEl.textContent = total.toFixed(1) + '%';
+  if (wrap) {
+    wrap.classList.toggle('alloc-over',     total > 100);
+    wrap.classList.toggle('alloc-complete', Math.abs(total - 100) < 0.1);
+    wrap.classList.toggle('alloc-neutral',  total <= 100 && Math.abs(total - 100) >= 0.1);
+  }
+  return total;
+}
+
 function openAddPlan() {
+  const income = getRecurringMonthlyIncome();
+  if (income === 0) {
+    UI.toast('Add at least one active recurring income entry in Budget Vault before creating a plan.', 'warning');
+    return;
+  }
   App.editing.plan = null;
   document.getElementById('plan-modal-title').textContent = 'Create Budget Plan';
-  document.getElementById('plan-name').value = '';
+  document.getElementById('plan-name').value        = '';
   document.getElementById('plan-description').value = '';
-  document.getElementById('plan-income').value = '';
+  updatePlanModalIncomeInfo();
   renderAllocRows([]);
   UI.openModal('plan-modal');
 }
 
 function openEditPlan(id) {
+  const income = getRecurringMonthlyIncome();
+  if (income === 0) {
+    UI.toast('Add at least one active recurring income entry in Budget Vault before editing a plan.', 'warning');
+    return;
+  }
   const p = App.plans.find(p => p.id === id);
   if (!p) return;
   App.editing.plan = p;
   document.getElementById('plan-modal-title').textContent = 'Edit Plan';
   document.getElementById('plan-name').value        = p.name;
   document.getElementById('plan-description').value = p.description || '';
-  document.getElementById('plan-income').value      = Fmt.set(p.monthly_income);
+  updatePlanModalIncomeInfo();
   renderAllocRows(Object.entries(p.allocations || {}).map(([name, v]) => ({ name, percentage: v.percentage, color: v.color })));
   UI.openModal('plan-modal');
 }
@@ -1138,6 +1255,7 @@ function renderAllocRows(rows) {
   if (!c) return;
   c.innerHTML = '';
   (rows.length ? rows : [{ name: '', percentage: '', color: '#BB885F' }]).forEach(r => addAllocRow(r));
+  updateAllocTotal();
 }
 
 function addAllocRow(data = {}) {
@@ -1147,18 +1265,33 @@ function addAllocRow(data = {}) {
   row.className = 'alloc-row';
   row.innerHTML = `
     <input type="text"   class="input alloc-name-input" placeholder="Category" value="${data.name || ''}">
-    <input type="number" class="input alloc-pct-input"  placeholder="%" min="0" max="100" value="${data.percentage || ''}">
+    <input type="number" class="input alloc-pct-input"  placeholder="%" min="0" max="100" step="0.1" value="${data.percentage || ''}">
     <input type="color"  class="color-input alloc-color-input" value="${data.color || '#BB885F'}">
-    <button type="button" class="icon-btn del-btn" onclick="this.parentElement.remove()">✕</button>`;
+    <button type="button" class="icon-btn del-btn">✕</button>`;
+
+  // Cap percentage so total never exceeds 100%
+  const pctInput = row.querySelector('.alloc-pct-input');
+  pctInput.addEventListener('input', () => {
+    const others = Array.from(document.querySelectorAll('#allocation-rows .alloc-pct-input'))
+      .filter(el => el !== pctInput)
+      .reduce((s, el) => s + (parseFloat(el.value) || 0), 0);
+    const remaining = Math.max(0, parseFloat((100 - others).toFixed(2)));
+    if ((parseFloat(pctInput.value) || 0) > remaining) pctInput.value = remaining;
+    updateAllocTotal();
+  });
+
+  // Remove row and update total
+  row.querySelector('.del-btn').addEventListener('click', () => { row.remove(); updateAllocTotal(); });
+
   c.appendChild(row);
+  updateAllocTotal();
 }
 
 function getAllocationsFromForm() {
-  const rows = document.querySelectorAll('#allocation-rows .alloc-row');
   const allocs = {};
-  rows.forEach(row => {
-    const name = row.querySelector('.alloc-name-input').value.trim();
-    const pct  = parseFloat(row.querySelector('.alloc-pct-input').value);
+  document.querySelectorAll('#allocation-rows .alloc-row').forEach(row => {
+    const name  = row.querySelector('.alloc-name-input').value.trim();
+    const pct   = parseFloat(row.querySelector('.alloc-pct-input').value);
     const color = row.querySelector('.alloc-color-input').value;
     if (name && !isNaN(pct) && pct > 0) allocs[name] = { percentage: pct, color };
   });
@@ -1166,13 +1299,17 @@ function getAllocationsFromForm() {
 }
 
 async function savePlan() {
-  const name           = document.getElementById('plan-name').value.trim();
-  const description    = document.getElementById('plan-description').value.trim();
-  const monthly_income = Fmt.get(document.getElementById('plan-income').value);
-  const allocations    = getAllocationsFromForm();
+  const name        = document.getElementById('plan-name').value.trim();
+  const description = document.getElementById('plan-description').value.trim();
+  const allocations = getAllocationsFromForm();
 
   if (!name) { UI.toast('Plan name is required.', 'error'); return; }
+  if (!Object.keys(allocations).length) { UI.toast('Add at least one allocation row.', 'error'); return; }
 
+  const totalPct = Object.values(allocations).reduce((s, v) => s + +v.percentage, 0);
+  if (totalPct > 100) { UI.toast('Total allocation exceeds 100%. Please reduce some percentages.', 'error'); return; }
+
+  const monthly_income = getRecurringMonthlyIncome();
   const payload = { user_id: App.user.id, name, description, allocations, monthly_income, updated_at: new Date().toISOString() };
   let error;
   if (App.editing.plan) {
@@ -1963,7 +2100,6 @@ function updateAmountLabels() {
     'lbl-goal-target':      `Target Amount (${sym}) *`,
     'lbl-contribute-amount':`Amount (${sym})`,
     'lbl-rec-amount':       `Amount (${sym}) *`,
-    'lbl-plan-income':      `Monthly Income (${sym})`,
     'lbl-sim-income':       `Monthly Income (${sym})`,
     'lbl-compare-income':   `Monthly Income (${sym})`,
   };

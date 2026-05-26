@@ -46,15 +46,8 @@ const UI = (() => {
     document.body.style.overflow = '';
   }
 
-  // Close modal when clicking backdrop
-  document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal')) closeAllModals();
-  });
-
-  // Close modal on Escape key
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAllModals();
-  });
+  // Backdrop clicks intentionally do NOT close modals —
+  // users must use the ✕ button or press Escape.
 
   // ── Confirm Dialog ───────────────────────────────────────
   function confirm(message, onConfirm, danger = true) {

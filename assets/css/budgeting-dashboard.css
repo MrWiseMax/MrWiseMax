@@ -308,6 +308,7 @@ body {
   border-radius: var(--radius-lg);
   padding: 18px 20px 14px;
   transition: border-color var(--ease);
+  min-width: 0; /* allow grid to shrink card below content intrinsic width */
 }
 
 .stat-card:hover {
@@ -327,6 +328,14 @@ body {
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: font-size 0.15s ease;
+}
+
+/* Full-row override when the number is too wide for half the grid */
+.stat-wide {
+  grid-column: 1 / -1;
 }
 
 .stat-card-value.income {

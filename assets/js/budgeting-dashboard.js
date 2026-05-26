@@ -292,6 +292,19 @@ function setupDynamicLayout() {
   // orientationchange fires before the viewport settles; the 150 ms delay
   // lets the browser finish repainting before we measure.
   window.addEventListener('orientationchange', () => setTimeout(_applyLayout, 150));
+
+  // Re-evaluate stat card widths on resize (debounced) so that rotating the
+  // device or resizing the browser window adjusts font sizes / full-row cards.
+  let _fitDebounce;
+  const _refitStats = () => {
+    clearTimeout(_fitDebounce);
+    _fitDebounce = setTimeout(() => {
+      if (App.activeSection === 'overview') fitStatCardValues();
+    }, 120);
+  };
+  window.addEventListener('resize', _refitStats);
+  window.visualViewport?.addEventListener('resize', _refitStats);
+  window.addEventListener('orientationchange', () => setTimeout(_refitStats, 200));
 }
 
 function _applyLayout() {
@@ -390,6 +403,81 @@ function renderOverview() {
   renderTrendChart();
   renderRecentTransactions();
   renderGoalsOverview();
+  // Double-RAF: first frame paints new text, second frame has accurate layout measurements
+  requestAnimationFrame(() => requestAnimationFrame(fitStatCardValues));
+}
+
+// Dynamically fits stat-card numbers to avoid horizontal overflow.
+// Priority order: full-width card → smaller font → error message.
+//
+// Why min-width:0 matters: CSS grid items default to min-width:auto, which
+// lets content (especially white-space:nowrap text) push the cell wider than
+// 1fr. Adding min-width:0 to .stat-card forces the grid to honour the column
+// track width, so overflow: hidden on .stat-card-value correctly clips the
+// text and scrollWidth > clientWidth becomes a reliable overflow signal.
+function fitStatCardValues() {
+  const DEFAULT_REM = 1.65;
+  const MIN_REM     = 0.9;   // never go below this font size
+  const STEP        = 0.25;  // shrink increment per pass
+
+  console.group('[StatCards] fitStatCardValues — viewport width:', window.innerWidth + 'px');
+
+  document.querySelectorAll('.stat-card').forEach(card => {
+    const valueEl = card.querySelector('.stat-card-value');
+    if (!valueEl) return;
+
+    const cardId   = valueEl.id || '(no id)';
+    const origText = valueEl.dataset.origText ?? valueEl.textContent.trim();
+
+    // ── Restore previous error state ──────────────────────────
+    if (valueEl.dataset.origText !== undefined) {
+      valueEl.textContent = valueEl.dataset.origText;
+      valueEl.style.color = '';
+      delete valueEl.dataset.origText;
+    }
+
+    // ── Reset to default size & remove wide class ─────────────
+    valueEl.style.fontSize = DEFAULT_REM + 'rem';
+    card.classList.remove('stat-wide');
+    void card.offsetWidth;   // flush pending style changes (synchronous reflow)
+
+    const cardW  = card.clientWidth;
+    const valW   = valueEl.scrollWidth;
+    console.log(`[StatCards] #${cardId} | text: "${origText}" | cardWidth: ${cardW}px | valueScrollWidth: ${valW}px`);
+
+    // ── Step 1: expand to full row if overflowing ──────────────
+    if (valueEl.scrollWidth > valueEl.clientWidth) {
+      card.classList.add('stat-wide');
+      void card.offsetWidth;
+      const newCardW = card.clientWidth;
+      console.log(`[StatCards] #${cardId} → STEP 1: added stat-wide | new cardWidth: ${newCardW}px | valueScrollWidth: ${valueEl.scrollWidth}px`);
+    } else {
+      console.log(`[StatCards] #${cardId} → fits at default size, no action needed`);
+    }
+
+    // ── Step 2: shrink font if still overflowing ───────────────
+    let rem = DEFAULT_REM;
+    while (valueEl.scrollWidth > valueEl.clientWidth && rem > MIN_REM) {
+      const prev = rem;
+      rem = parseFloat(Math.max(rem - STEP, MIN_REM).toFixed(2));
+      valueEl.style.fontSize = rem + 'rem';
+      void valueEl.offsetWidth;
+      console.log(`[StatCards] #${cardId} → STEP 2: font ${prev}rem → ${rem}rem | scrollWidth: ${valueEl.scrollWidth}px | clientWidth: ${valueEl.clientWidth}px`);
+    }
+
+    // ── Step 3: still overflowing at minimum → error ──────────
+    if (valueEl.scrollWidth > valueEl.clientWidth) {
+      valueEl.dataset.origText = valueEl.textContent;
+      valueEl.textContent      = 'Number is too long!';
+      valueEl.style.fontSize   = '0.75rem';
+      valueEl.style.color      = 'var(--danger)';
+      console.warn(`[StatCards] #${cardId} → STEP 3: number too large even at ${MIN_REM}rem, showing error`);
+    } else {
+      console.log(`[StatCards] #${cardId} → ✓ resolved | final fontSize: ${valueEl.style.fontSize || DEFAULT_REM + 'rem'} | stat-wide: ${card.classList.contains('stat-wide')}`);
+    }
+  });
+
+  console.groupEnd();
 }
 
 function calcHealthScore() {
@@ -1875,6 +1963,9 @@ function updateAmountLabels() {
     'lbl-goal-target':      `Target Amount (${sym}) *`,
     'lbl-contribute-amount':`Amount (${sym})`,
     'lbl-rec-amount':       `Amount (${sym}) *`,
+    'lbl-plan-income':      `Monthly Income (${sym})`,
+    'lbl-sim-income':       `Monthly Income (${sym})`,
+    'lbl-compare-income':   `Monthly Income (${sym})`,
   };
   Object.entries(map).forEach(([id, text]) => {
     const el = document.getElementById(id);

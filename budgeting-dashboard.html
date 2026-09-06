@@ -40,10 +40,7 @@
       <nav class="sidebar-nav">
         <div class="nav-section-label">Finance</div>
         <button class="nav-item active" data-nav="overview"><span class="nav-icon">📊</span> Overview</button>
-        <button class="nav-item" data-nav="vault"><span class="nav-icon">🏦</span> Money Movements</button>
-        <button class="nav-item" data-nav="plans"><span class="nav-icon">📋</span> Budget Plans</button>
-        <button class="nav-item" data-nav="simulate"><span class="nav-icon">🔮</span> Simulations</button>
-        <button class="nav-item" data-nav="compare"><span class="nav-icon">⚖️</span> Plan Comparison</button>
+        <button class="nav-item" data-nav="expenses"><span class="nav-icon">🧾</span> Expenses</button>
 
         <div class="nav-section-label" style="margin-top:8px">Community</div>
         <button class="nav-item" data-nav="community"><span class="nav-icon">🌐</span> Community Feed</button>
@@ -100,315 +97,104 @@
            SECTION: OVERVIEW
       ═══════════════════════════════════════ -->
         <section class="dash-section active" id="section-overview">
-          <h1 class="section-title">Financial Overview</h1>
-          <p class="section-subtitle">Your financial snapshot for this month.</p>
+          <h1 class="section-title">Overview</h1>
+          <p class="section-subtitle">What your money covers — and what it doesn't.</p>
 
-          <!-- Current account balance -->
-          <div class="card balance-card">
+          <!-- Bank balances -->
+          <div class="card balance-card stagger">
             <div class="balance-main">
-              <div class="balance-label">Current Account Balance</div>
+              <div class="balance-label">Total Across Accounts</div>
               <div class="balance-value" id="balance-value">&mdash;</div>
               <div class="balance-meta" id="balance-meta"></div>
-              <div class="balance-runway" id="balance-runway"></div>
             </div>
             <div class="balance-form">
               <div class="balance-form-label" id="lbl-balance-input">Your accounts ($)</div>
               <div class="balance-accounts" id="balance-accounts"></div>
               <button class="btn btn-ghost btn-sm balance-add-btn" type="button"
                 onclick="addBalanceAccountRow()">+ Add account</button>
-              <div class="balance-hint">Name each account and enter what is in it now — the app adds
-                them up. Everything you log from here on updates the total automatically.</div>
+              <div class="balance-hint">Name each account and enter what is in it now &mdash; the app adds
+                them up and checks your upcoming charges against the total.</div>
             </div>
           </div>
 
-          <!-- Stats -->
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-card-label">Monthly Income</div>
-              <div class="stat-card-value income" id="stat-income">$0.00</div>
-              <div class="stat-card-sub" id="stat-income-sub"></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-label">Monthly Expenses</div>
-              <div class="stat-card-value expense" id="stat-expenses">$0.00</div>
-              <div class="stat-card-sub" id="stat-expenses-sub"></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-label">Net Savings</div>
-              <div class="stat-card-value savings" id="stat-savings">$0.00</div>
-              <div class="stat-card-sub" id="stat-savings-sub"></div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-card-label">Burn Rate</div>
-              <div class="stat-card-value burn" id="stat-burn">0%</div>
-            </div>
-          </div>
-
-          <!-- Charts + Health Score -->
-          <div class="charts-grid">
-            <div class="chart-card">
-              <div class="chart-card-title">Expense Breakdown</div>
-              <div class="chart-container">
-                <canvas id="expense-pie-chart"></canvas>
+          <!-- Coverage -->
+          <div class="card coverage-card stagger">
+            <div class="coverage-head">
+              <div>
+                <div class="card-title" style="margin:0">Can you cover it?</div>
+                <div class="coverage-sub" id="coverage-sub">Add an expense to see this.</div>
+              </div>
+              <div class="seg" id="coverage-window">
+                <button class="seg-btn" type="button" data-days="7">7 days</button>
+                <button class="seg-btn active" type="button" data-days="30">30 days</button>
+                <button class="seg-btn" type="button" data-days="90">90 days</button>
               </div>
             </div>
-            <div class="chart-card">
-              <div class="chart-card-title">6-Month Income vs Expenses</div>
-              <div class="chart-container">
-                <canvas id="trend-chart"></canvas>
-              </div>
+
+            <div class="coverage-bar" id="coverage-bar">
+              <div class="coverage-bar-fill" id="coverage-fill"></div>
             </div>
+            <div class="coverage-figures" id="coverage-figures"></div>
+            <div class="coverage-list" id="coverage-list"></div>
           </div>
 
-          <!-- Health Score + Recent Transactions -->
           <div class="two-col">
-            <div class="card">
-              <div class="card-title">Financial Health Score</div>
-              <div id="health-score"></div>
-              <ul id="health-tips"></ul>
+            <div class="card stagger">
+              <div class="card-title">What it really costs</div>
+              <div id="cost-summary"></div>
             </div>
-            <div class="card">
-              <div class="card-title">Recent Transactions</div>
-              <div id="recent-transactions"></div>
+            <div class="card stagger">
+              <div class="card-title">Worth a look</div>
+              <div id="attention-list"></div>
             </div>
-          </div>
-
-          <!-- Goals -->
-          <div class="card">
-            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-              Savings Goals Progress
-              <button class="btn btn-sm btn-primary" onclick="navigateTo('vault')">Manage Goals</button>
-            </div>
-            <div id="goals-overview" style="margin-top:12px"></div>
           </div>
         </section>
 
         <!-- ═══════════════════════════════════════
            SECTION: VAULT
       ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-vault">
-          <h1 class="section-title">Money Movements</h1>
-          <p class="section-subtitle">Your private financial transactions and savings goals.</p>
-
-          <!-- Transactions -->
-          <div class="card" style="margin-bottom:20px">
-            <div class="vault-header">
-              <div class="card-title" style="margin:0">Transactions</div>
-              <button class="btn btn-primary btn-sm" onclick="openAddTransaction()">+ Add Transaction</button>
+        <section class="dash-section" id="section-expenses">
+          <div class="expenses-head">
+            <div>
+              <h1 class="section-title" style="margin-bottom:2px">Expenses</h1>
+              <p class="section-subtitle" style="margin:0">Every subscription, bill, liability and repayment
+                in one place.</p>
             </div>
-            <!-- Filters -->
-            <div class="filters-row">
-              <select class="filter-select" id="filter-type">
-                <option value="">All Types</option>
-                <option value="income">Income</option>
-                <option value="expense">Expense</option>
-              </select>
-              <select class="filter-select" id="filter-month">
-                <option value="">All Months</option>
-                <option value="0">January</option>
-                <option value="1">February</option>
-                <option value="2">March</option>
-                <option value="3">April</option>
-                <option value="4">May</option>
-                <option value="5">June</option>
-                <option value="6">July</option>
-                <option value="7">August</option>
-                <option value="8">September</option>
-                <option value="9">October</option>
-                <option value="10">November</option>
-                <option value="11">December</option>
-              </select>
-              <select class="filter-select" id="filter-year">
-                <option value="">All Years</option>
-              </select>
+            <div class="expenses-actions">
+              <button class="btn btn-ghost btn-sm" onclick="openAddGroup()">+ New group</button>
+              <button class="btn btn-primary btn-sm" onclick="openAddExpense()">+ Add expense</button>
             </div>
-            <div id="transaction-list"></div>
           </div>
 
-          <!-- Recurring Income & Expenses -->
-          <div class="card" style="margin-bottom:20px">
-            <div class="vault-header">
-              <div>
-                <div class="card-title" style="margin:0">Recurring Transactions</div>
-                <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px">Monthly salary, rent,
-                  subscriptions — posted automatically each month</div>
-              </div>
-              <button class="btn btn-primary btn-sm" onclick="openAddRecurring()">+ Add Recurring</button>
-            </div>
-            <div id="recurring-list" style="margin-top:14px"></div>
+          <div id="import-banner"></div>
+
+          <div class="expenses-toolbar">
+            <input type="text" class="input" id="expense-search" placeholder="Search expenses…"
+              autocomplete="off">
+            <select class="filter-select" id="expense-sort">
+              <option value="due">Sort: next charge</option>
+              <option value="cost">Sort: cost, highest</option>
+              <option value="name">Sort: name</option>
+            </select>
+            <label class="expense-check">
+              <input type="checkbox" id="expense-show-paused"> Show paused
+            </label>
           </div>
 
-          <!-- Goals -->
-          <div class="card">
-            <div class="vault-header">
-              <div class="card-title" style="margin:0">Savings Goals</div>
-              <button class="btn btn-primary btn-sm" onclick="openAddGoal()">+ Create Goal</button>
-            </div>
-            <div class="goals-grid" id="goals-list" style="margin-top:12px"></div>
-          </div>
+          <div id="expense-groups"></div>
         </section>
 
         <!-- ═══════════════════════════════════════
            SECTION: PLANS
       ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-plans">
-          <div
-            style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px">
-            <div>
-              <h1 class="section-title">Budget Plans</h1>
-              <p class="section-subtitle">Create, manage, and compare your budgeting strategies.</p>
-            </div>
-            <button class="btn btn-primary" onclick="openAddPlan()">+ Create Plan</button>
-          </div>
-          <div class="plans-grid" id="plans-grid"></div>
-          <div id="community-templates-section" style="margin-top:32px"></div>
-        </section>
 
         <!-- ═══════════════════════════════════════
            SECTION: SIMULATE
       ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-simulate">
-          <h1 class="section-title">Financial Simulations</h1>
-          <p class="section-subtitle">Project your financial future based on your current strategy.</p>
-
-          <div class="card" style="margin-bottom:20px">
-            <div class="card-title">Simulation Parameters</div>
-            <div class="sim-form">
-              <div class="form-group">
-                <label class="label" id="lbl-sim-income">Monthly Income ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-income"
-                  placeholder="e.g. 4,000">
-              </div>
-              <div class="form-group">
-                <label class="label">Monthly Expenses ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-expenses"
-                  placeholder="e.g. 2,500">
-              </div>
-              <div class="form-group">
-                <label class="label">Savings Rate (%)</label>
-                <input type="number" class="input" id="sim-savings-pct" placeholder="e.g. 20" min="0" max="100">
-              </div>
-              <div class="form-group">
-                <label class="label">Investment Rate (%)</label>
-                <input type="number" class="input" id="sim-invest-pct" placeholder="e.g. 10" min="0" max="100">
-              </div>
-              <div class="form-group">
-                <label class="label">Annual Return Rate (%)</label>
-                <input type="number" class="input" id="sim-return" placeholder="e.g. 7" min="0" max="50" value="7">
-              </div>
-              <div class="form-group">
-                <label class="label">Monthly Debt Payment ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-debt" placeholder="e.g. 300">
-              </div>
-              <div class="form-group">
-                <label class="label">Total Debt Balance ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="sim-total-debt"
-                  placeholder="e.g. 15,000">
-              </div>
-              <div class="form-group">
-                <label class="label">Time Horizon (Years)</label>
-                <select class="input" id="sim-years">
-                  <option value="1">1 Year</option>
-                  <option value="3">3 Years</option>
-                  <option value="5" selected>5 Years</option>
-                  <option value="10">10 Years</option>
-                </select>
-              </div>
-            </div>
-            <button class="btn btn-primary" onclick="runSimulation()">🔮 Run Simulation</button>
-          </div>
-
-          <!-- Results -->
-          <div id="sim-results" class="hidden">
-            <div class="sim-results-grid">
-              <div class="sim-result-card">
-                <div class="sim-result-label">Total Savings</div>
-                <div class="sim-result-value" id="sim-total-savings">—</div>
-              </div>
-              <div class="sim-result-card">
-                <div class="sim-result-label">Investment Value</div>
-                <div class="sim-result-value" id="sim-total-invest">—</div>
-              </div>
-              <div class="sim-result-card">
-                <div class="sim-result-label">Net Worth</div>
-                <div class="sim-result-value" id="sim-net-worth">—</div>
-              </div>
-              <div class="sim-result-card">
-                <div class="sim-result-label">Remaining Debt</div>
-                <div class="sim-result-value" id="sim-final-debt">—</div>
-              </div>
-              <div class="sim-result-card">
-                <div class="sim-result-label">Risk Score</div>
-                <div class="sim-result-value" id="sim-risk-score">—</div>
-              </div>
-              <div class="sim-result-card">
-                <div class="sim-result-label">Assessment</div>
-                <div class="sim-result-value" id="sim-risk-label" style="font-size:0.95rem">—</div>
-              </div>
-            </div>
-            <div class="chart-card">
-              <div class="chart-card-title">Wealth Projection Over Time</div>
-              <div class="chart-container" style="height:300px">
-                <canvas id="sim-chart"></canvas>
-              </div>
-            </div>
-          </div>
-        </section>
 
         <!-- ═══════════════════════════════════════
            SECTION: COMPARE
       ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-compare">
-          <h1 class="section-title">Plan Comparison</h1>
-          <p class="section-subtitle">Compare two budget plans side-by-side to find the winning strategy.</p>
-
-          <div class="card" style="margin-bottom:20px">
-            <div class="card-title">Select Plans to Compare</div>
-            <div class="compare-selectors">
-              <div class="form-group" style="margin:0">
-                <label class="label">Plan 1</label>
-                <select class="input" id="compare-plan-1"></select>
-              </div>
-              <div class="form-group" style="margin:0">
-                <label class="label">Plan 2</label>
-                <select class="input" id="compare-plan-2"></select>
-              </div>
-              <div class="form-group" style="margin:0">
-                <label class="label">&#8203;</label>
-                <button class="btn btn-primary" onclick="comparePlans()">Compare →</button>
-              </div>
-            </div>
-            <div class="input-row" style="margin-top:14px">
-              <div class="form-group" style="margin:0">
-                <label class="label" id="lbl-compare-income">Monthly Income ($)</label>
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="compare-income"
-                  placeholder="e.g. 4,000">
-              </div>
-              <div class="form-group" style="margin:0">
-                <label class="label">Compare Over (Years)</label>
-                <select class="input" id="compare-years">
-                  <option value="1">1 Year</option>
-                  <option value="3">3 Years</option>
-                  <option value="5" selected>5 Years</option>
-                  <option value="10">10 Years</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div id="compare-results" class="hidden">
-            <div class="card" style="margin-bottom:20px">
-              <div class="card-title">Comparison Results</div>
-              <div id="compare-table" style="margin-top:12px"></div>
-            </div>
-            <div class="chart-card">
-              <div class="chart-card-title">Projected Wealth Comparison</div>
-              <div class="chart-container" style="height:300px">
-                <canvas id="compare-chart"></canvas>
-              </div>
-            </div>
-          </div>
-        </section>
 
         <!-- ═══════════════════════════════════════
            SECTION: COMMUNITY
@@ -547,16 +333,16 @@
                 style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px;margin-top:8px"></div>
               <div class="profile-stats">
                 <div class="profile-stat">
-                  <div class="profile-stat-value" id="profile-stat-transactions">0</div>
-                  <div class="profile-stat-label">Transactions</div>
+                  <div class="profile-stat-value" id="profile-stat-expenses">0</div>
+                  <div class="profile-stat-label">Expenses</div>
                 </div>
                 <div class="profile-stat">
-                  <div class="profile-stat-value" id="profile-stat-plans">0</div>
-                  <div class="profile-stat-label">Plans</div>
+                  <div class="profile-stat-value" id="profile-stat-groups">0</div>
+                  <div class="profile-stat-label">Groups</div>
                 </div>
                 <div class="profile-stat">
-                  <div class="profile-stat-value" id="profile-stat-goals">0</div>
-                  <div class="profile-stat-label">Goals</div>
+                  <div class="profile-stat-value" id="profile-stat-monthly">0</div>
+                  <div class="profile-stat-label">Per month</div>
                 </div>
               </div>
             </div>
@@ -661,11 +447,11 @@
 
   <!-- ── Others Popup (sits above mobile nav) ───────────────────── -->
   <div class="mobile-more-popup" id="mobile-more-popup">
-    <button class="mobile-more-item" onclick="mobileMoreNav('simulate')">
-      <span class="mobile-more-icon">🔮</span>Simulations
+    <button class="mobile-more-item" onclick="mobileMoreNav('saved')">
+      <span class="mobile-more-icon">🔖</span>Saved Blueprints
     </button>
-    <button class="mobile-more-item" onclick="mobileMoreNav('compare')">
-      <span class="mobile-more-icon">⚖️</span>Plan Comparison
+    <button class="mobile-more-item" onclick="mobileMoreNav('profile')">
+      <span class="mobile-more-icon">👤</span>Profile
     </button>
     <button class="mobile-more-item" onclick="mobileMoreNav('education')">
       <span class="mobile-more-icon">🎓</span>Education
@@ -677,11 +463,8 @@
     <button class="mobile-nav-item active" data-nav="overview">
       <span class="mobile-nav-icon">📊</span>Overview
     </button>
-    <button class="mobile-nav-item" data-nav="vault">
-      <span class="mobile-nav-icon">🏦</span>Money
-    </button>
-    <button class="mobile-nav-item" data-nav="plans">
-      <span class="mobile-nav-icon">📋</span>Plans
+    <button class="mobile-nav-item" data-nav="expenses">
+      <span class="mobile-nav-icon">🧾</span>Expenses
     </button>
     <button class="mobile-nav-item" data-nav="community">
       <span class="mobile-nav-icon">🌐</span>Community
@@ -744,146 +527,98 @@
     </div>
   </div>
 
-  <!-- Add / Edit Transaction -->
-  <div class="modal" id="transaction-modal">
-    <div class="modal-box">
+
+
+
+
+
+  <!-- Expense Modal -->
+  <div class="modal" id="expense-modal">
+    <div class="modal-box" style="max-width:480px">
       <div class="modal-header">
-        <h2 id="tx-modal-title">Add Transaction</h2>
-        <button class="modal-close" onclick="UI.closeModal('transaction-modal')">✕</button>
+        <h2 id="expense-modal-title">Add Expense</h2>
+        <button class="modal-close" onclick="UI.closeModal('expense-modal')">✕</button>
       </div>
       <div class="form-group">
-        <label class="label">Type *</label>
-        <select class="input" id="tx-type">
-          <option value="expense">Expense</option>
-          <option value="income">Income</option>
-        </select>
+        <label class="label">Name *</label>
+        <input type="text" class="input" id="exp-name" maxlength="60"
+          placeholder="e.g. Flow AI Subscription, Staff 1, Car Loan" autocomplete="off">
       </div>
       <div class="input-row">
         <div class="form-group">
-          <label class="label" id="lbl-tx-amount">Amount ($) *</label>
-          <input type="text" inputmode="decimal" class="input fmt-currency" id="tx-amount" placeholder="0.00">
+          <label class="label" id="lbl-exp-amount">Amount ($) *</label>
+          <input type="text" inputmode="decimal" class="input fmt-currency" id="exp-amount" placeholder="0">
         </div>
         <div class="form-group">
-          <label class="label">Date *</label>
-          <input type="date" class="input" id="tx-date">
+          <label class="label">Charged *</label>
+          <select class="input" id="exp-cadence">
+            <option value="daily">Every day</option>
+            <option value="weekly">Every week</option>
+            <option value="monthly" selected>Every month</option>
+            <option value="yearly">Every year</option>
+            <option value="custom">Every N days…</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" id="exp-custom-wrap" hidden>
+        <label class="label">Every how many days? *</label>
+        <input type="number" min="1" max="3650" class="input" id="exp-custom-days" placeholder="e.g. 45">
+      </div>
+      <div class="input-row">
+        <div class="form-group">
+          <label class="label">Next charge *</label>
+          <input type="date" class="input" id="exp-next-due">
+        </div>
+        <div class="form-group">
+          <label class="label">Group</label>
+          <select class="input" id="exp-group"></select>
         </div>
       </div>
       <div class="form-group">
-        <label class="label">Category *</label>
-        <div class="category-combo">
-          <input type="text" class="input" id="tx-category" placeholder="Type or select category…" autocomplete="off">
-          <div class="category-suggestions" id="tx-category-suggestions"></div>
-        </div>
+        <label class="label">Ends on <span class="label-hint">optional — for loans and fixed terms</span></label>
+        <input type="date" class="input" id="exp-ends-on">
       </div>
       <div class="form-group">
-        <label class="label">Description (optional)</label>
-        <input type="text" class="input" id="tx-description" placeholder="e.g. Grocery run">
+        <label class="label">Note <span class="label-hint">optional</span></label>
+        <input type="text" class="input" id="exp-notes" maxlength="500"
+          placeholder="e.g. cancel before renewal, shared with team">
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="UI.closeModal('transaction-modal')">Cancel</button>
-        <button class="btn btn-primary" id="tx-save-btn" onclick="saveTransaction()">Save Transaction</button>
+        <button class="btn btn-ghost" onclick="UI.closeModal('expense-modal')">Cancel</button>
+        <button class="btn btn-primary" id="exp-save-btn" onclick="saveExpense()">Save</button>
       </div>
     </div>
   </div>
 
-  <!-- Add / Edit Goal -->
-  <div class="modal" id="goal-modal">
-    <div class="modal-box">
+  <!-- Expense Group Modal -->
+  <div class="modal" id="group-modal">
+    <div class="modal-box" style="max-width:420px">
       <div class="modal-header">
-        <h2 id="goal-modal-title">Create Savings Goal</h2>
-        <button class="modal-close" onclick="UI.closeModal('goal-modal')">✕</button>
+        <h2 id="group-modal-title">New Group</h2>
+        <button class="modal-close" onclick="UI.closeModal('group-modal')">✕</button>
       </div>
-      <div class="form-group">
-        <label class="label">Goal Name *</label>
-        <input type="text" class="input" id="goal-name" placeholder="e.g. Emergency Fund">
-      </div>
-      <div class="input-row">
-        <div class="form-group">
-          <label class="label" id="lbl-goal-target">Target Amount ($) *</label>
-          <input type="text" inputmode="decimal" class="input fmt-currency" id="goal-target" placeholder="5,000">
-        </div>
-        <div class="form-group">
-          <label class="label">Current Saved ($)</label>
-          <input type="text" inputmode="decimal" class="input fmt-currency" id="goal-current" placeholder="0">
-        </div>
-      </div>
-      <div class="input-row">
-        <div class="form-group">
-          <label class="label">Target Date (optional)</label>
-          <input type="date" class="input" id="goal-deadline">
-        </div>
-        <div class="form-group">
-          <label class="label">Color</label>
-          <input type="color" class="color-input" id="goal-color" value="#BB885F" style="width:100%;height:42px">
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="UI.closeModal('goal-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveGoal()">Save Goal</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Contribute to Goal -->
-  <div class="modal" id="contribute-modal">
-    <div class="modal-box" style="max-width:380px">
-      <div class="modal-header">
-        <h2>Add Contribution</h2>
-        <button class="modal-close" onclick="UI.closeModal('contribute-modal')">✕</button>
-      </div>
-      <p style="font-size:0.875rem;color:var(--text-muted);margin-bottom:16px">
-        Adding to: <strong id="contribute-goal-name"></strong>
+      <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:18px">
+        A bucket to file costs under — "YouTube", "Household", "Debts" — so you can see what each
+        part of your life actually costs.
       </p>
+      <div class="input-row">
+        <div class="form-group">
+          <label class="label">Name *</label>
+          <input type="text" class="input" id="grp-name" maxlength="40" placeholder="e.g. YouTube"
+            autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="label">Icon</label>
+          <input type="text" class="input" id="grp-icon" maxlength="8" placeholder="🎬">
+        </div>
+      </div>
       <div class="form-group">
-        <label class="label" id="lbl-contribute-amount">Amount ($)</label>
-        <input type="text" inputmode="decimal" class="input fmt-currency" id="contribute-amount" placeholder="e.g. 100">
+        <label class="label">Colour</label>
+        <div class="swatches" id="grp-swatches"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="UI.closeModal('contribute-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="contributeToGoal()">Add Contribution</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Create / Edit Budget Plan -->
-  <div class="modal" id="plan-modal">
-    <div class="modal-box modal-lg">
-      <div class="modal-header">
-        <h2 id="plan-modal-title">Create Budget Plan</h2>
-        <button class="modal-close" onclick="UI.closeModal('plan-modal')">✕</button>
-      </div>
-      <div class="form-group">
-        <label class="label">Plan Name *</label>
-        <input type="text" class="input" id="plan-name" placeholder="e.g. Conservative Growth Plan">
-      </div>
-      <div class="form-group">
-        <label class="label">Description (optional)</label>
-        <input type="text" class="input" id="plan-description" placeholder="Brief description…">
-      </div>
-
-      <!-- Income basis pulled from recurring entries -->
-      <div id="plan-modal-income-info" class="plan-modal-income-info"></div>
-
-      <div style="margin-bottom:12px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <label class="label" style="margin:0">Budget Allocations <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400">(total must not exceed 100%)</span></label>
-          <button type="button" class="btn btn-sm btn-outline" onclick="addAllocRow()">+ Add Row</button>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 80px 40px 28px;gap:6px;margin-bottom:6px;padding:0 2px">
-          <span style="font-size:0.72rem;color:var(--text-dim);text-transform:uppercase">Category</span>
-          <span style="font-size:0.72rem;color:var(--text-dim);text-transform:uppercase">%</span>
-          <span style="font-size:0.72rem;color:var(--text-dim);text-transform:uppercase">Color</span>
-          <span></span>
-        </div>
-        <div id="allocation-rows"></div>
-        <div id="alloc-total-display" class="alloc-total-display">
-          Total allocated: <span id="alloc-total-pct">0%</span> / 100%
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="UI.closeModal('plan-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="savePlan()">Save Plan</button>
+        <button class="btn btn-ghost" onclick="UI.closeModal('group-modal')">Cancel</button>
+        <button class="btn btn-primary" id="grp-save-btn" onclick="saveGroup()">Save</button>
       </div>
     </div>
   </div>
@@ -959,60 +694,6 @@
     </div>
   </div>
 
-  <!-- Recurring Transaction Modal -->
-  <div class="modal" id="recurring-modal">
-    <div class="modal-box" style="max-width:460px">
-      <div class="modal-header">
-        <h2 id="rec-modal-title">Add Recurring Entry</h2>
-        <button class="modal-close" onclick="UI.closeModal('recurring-modal')">✕</button>
-      </div>
-      <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:18px">
-        This posts a transaction on the chosen day every month (e.g. salary on the 1st, rent on the
-        5th). Pick a start month in the past and every month since is filled in — and kept filled,
-        so a month can never quietly go missing.
-      </p>
-      <div class="form-group">
-        <label class="label">Type *</label>
-        <select class="input" id="rec-type">
-          <option value="income">Income</option>
-          <option value="expense">Expense</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="label" id="lbl-rec-amount">Amount ($) *</label>
-        <input type="text" inputmode="decimal" class="input fmt-currency" id="rec-amount" placeholder="0.00">
-      </div>
-      <div class="input-row">
-        <div class="form-group">
-          <label class="label">Day of Month *</label>
-          <select class="input" id="rec-day">
-            <!-- 1–28 populated below -->
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="label">Starting From *</label>
-          <select class="input" id="rec-start">
-            <!-- months populated below -->
-          </select>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="label">Category *</label>
-        <div class="category-combo">
-          <input type="text" class="input" id="rec-category" placeholder="Type or select category…" autocomplete="off">
-          <div class="category-suggestions" id="rec-category-suggestions"></div>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="label">Description (optional)</label>
-        <input type="text" class="input" id="rec-description" placeholder="e.g. Monthly Salary, Netflix, House Rent…">
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="UI.closeModal('recurring-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveRecurring()">Save</button>
-      </div>
-    </div>
-  </div>
 
   <!-- Currency Modal -->
   <div class="modal" id="currency-modal">

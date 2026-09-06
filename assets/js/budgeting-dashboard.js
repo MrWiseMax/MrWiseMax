@@ -6,6 +6,7 @@
 const App = {
   user: null,
   profile: null,
+  balance: null,
   transactions: [],
   categories: [],
   plans: [],
@@ -17,7 +18,7 @@ const App = {
   likedBlueprintIds: new Set(),
   charts: {},
   activeSection: 'overview',
-  filters: { month: '', year: '', category: '', type: '' },
+  filters: { month: '', year: '', type: '' },
   editing: { transaction: null, plan: null, goal: null, recurring: null },
   communitySearch: '',
 };
@@ -192,6 +193,7 @@ const Money = {
     const codes = [CurrencySettings.main.code, 'USD'];
     [App.transactions, App.recurring, App.goals, App.plans].forEach(list =>
       (list || []).forEach(row => { if (row.currency) codes.push(row.currency); }));
+    if (App.balance?.currency) codes.push(App.balance.currency);
     return codes;
   },
 };
@@ -264,7 +266,7 @@ async function initDashboard() {
   document.getElementById('page-loader').style.display = 'none';
   renderUserInfo();
 
-  await Promise.all([loadProfile(), loadCategories(), loadTransactions(), loadPlans(), loadGoals(), loadRecurring()]);
+  await Promise.all([loadProfile(), loadCategories(), loadTransactions(), loadPlans(), loadGoals(), loadRecurring(), loadBalance()]);
 
   // Rates must be in place before anything renders: every amount is converted
   // from the currency it was saved in into the one being displayed.
@@ -455,6 +457,7 @@ async function loadCategories()   { const { data } = await db.from('categories')
 async function loadTransactions() { const { data } = await db.from('transactions').select('*').eq('user_id', App.user.id).order('date', { ascending: false }); if (data) App.transactions = data; }
 async function loadPlans()        { const { data } = await db.from('budget_plans').select('*').eq('user_id', App.user.id).order('created_at', { ascending: false }); if (data) App.plans = data; }
 async function loadGoals()        { const { data } = await db.from('savings_goals').select('*').eq('user_id', App.user.id).order('created_at', { ascending: false }); if (data) App.goals = data; }
+async function loadBalance()      { const { data } = await db.from('account_balance').select('*').eq('user_id', App.user.id).maybeSingle(); App.balance = data || null; }
 
 async function loadUserInteractions() {
   const [l, s] = await Promise.all([
@@ -496,6 +499,7 @@ function renderOverview() {
       : '';
   });
 
+  renderBalanceCard();
   renderHealthScore(score);
   renderExpensePieChart(thisMonth);
   renderTrendChart();
@@ -503,6 +507,126 @@ function renderOverview() {
   renderGoalsOverview();
   // Double-RAF: first frame paints new text, second frame has accurate layout measurements
   requestAnimationFrame(() => requestAnimationFrame(fitStatCardValues));
+}
+
+// ── ACCOUNT BALANCE ──────────────────────────────────────────
+// The user tells the app what is in their account; we store that figure as an
+// anchor — true as of the moment they saved it — and add everything they log
+// afterwards on top. The number then stays right without being re-typed.
+
+// Transactions recorded after the anchor: the ones the stated balance cannot
+// already account for. Keyed on created_at, not the transaction date, so a
+// coffee logged five minutes from now counts immediately.
+function txSinceBalance() {
+  const asOf = App.balance?.as_of;
+  if (!asOf) return [];
+  const cut = new Date(asOf).getTime();
+  return App.transactions.filter(t => t.created_at && new Date(t.created_at).getTime() > cut);
+}
+
+// The anchor plus everything since, in the currency currently on screen.
+// null when the user has not set a balance yet.
+function liveBalance() {
+  if (!App.balance) return null;
+  return txSinceBalance().reduce(
+    (sum, t) => sum + (t.type === 'income' ? 1 : -1) * Money.toActive(t.amount, t.currency),
+    Money.toActive(App.balance.balance, App.balance.currency)
+  );
+}
+
+// Average monthly spend over the last 90 days — the denominator for runway.
+function avgMonthlyBurn() {
+  const since = new Date();
+  since.setDate(since.getDate() - 90);
+  const cutoff = since.toISOString().slice(0, 10);
+  const spent  = App.transactions
+    .filter(t => t.type === 'expense' && String(t.date).slice(0, 10) >= cutoff)
+    .reduce((s, t) => s + Money.toActive(t.amount, t.currency), 0);
+  return spent / 3;
+}
+
+// How many months the balance would cover at that burn. null when unknowable.
+function balanceRunway() {
+  const bal  = liveBalance();
+  const burn = avgMonthlyBurn();
+  if (bal == null || bal <= 0 || burn <= 0) return null;
+  return bal / burn;
+}
+
+function renderBalanceCard() {
+  const valueEl = document.getElementById('balance-value');
+  if (!valueEl) return;
+  const metaEl   = document.getElementById('balance-meta');
+  const runwayEl = document.getElementById('balance-runway');
+  const live     = liveBalance();
+
+  if (live == null) {
+    valueEl.textContent = '\u2014';
+    valueEl.classList.remove('negative');
+    if (metaEl)   metaEl.textContent = 'Not set yet — enter it once and the app keeps it current for you.';
+    if (runwayEl) runwayEl.textContent = '';
+    return;
+  }
+
+  valueEl.textContent = UI.currency(live);
+  valueEl.classList.toggle('negative', live < 0);
+
+  const anchor = Money.toActive(App.balance.balance, App.balance.currency);
+  const since  = txSinceBalance();
+  const change = live - anchor;
+  const when   = UI.formatDate(String(App.balance.as_of).slice(0, 10));
+
+  if (metaEl) {
+    metaEl.textContent = since.length
+      ? `${UI.currency(anchor)} on ${when}, ${change < 0 ? '−' : '+'}${UI.currency(Math.abs(change))} ` +
+        `from ${since.length} transaction${since.length === 1 ? '' : 's'} logged since.`
+      : `Set to ${UI.currency(anchor)} on ${when}.`;
+  }
+
+  if (runwayEl) {
+    const months = balanceRunway();
+    if (months == null) {
+      runwayEl.textContent = '';
+    } else if (months >= 24) {
+      runwayEl.textContent = 'Over 2 years of runway at your recent spending.';
+    } else {
+      const m = months.toFixed(1);
+      runwayEl.textContent = `About ${m} month${m === '1.0' ? '' : 's'} of runway at your recent spending.`;
+    }
+  }
+}
+
+async function saveAccountBalance(event) {
+  event?.preventDefault();
+  const inputEl = document.getElementById('balance-input');
+  const raw     = (inputEl?.value || '').trim();
+  if (!raw) { UI.toast('Enter the balance that is in your account right now.', 'error'); return; }
+
+  const amount = Fmt.get(raw);
+  if (isNaN(amount)) { UI.toast('That does not look like a number.', 'error'); return; }
+
+  const btn = document.getElementById('balance-save-btn');
+  UI.setLoading(btn, true);
+
+  // Recorded in the currency on screen, like every other amount, and stamped
+  // now — everything logged after this moment moves the balance on its own.
+  const now = new Date().toISOString();
+  const { error } = await db.from('account_balance').upsert({
+    user_id:    App.user.id,
+    balance:    amount,
+    currency:   CurrencySettings.activeCode,
+    as_of:      now,
+    updated_at: now,
+  }, { onConflict: 'user_id' });
+
+  UI.setLoading(btn, false);
+  if (error) { UI.toast(error.message, 'error'); return; }
+
+  if (inputEl) inputEl.value = '';
+  await loadBalance();
+  await CurrencySettings.ensureRates(Money.usedCodes());
+  renderOverview();
+  UI.toast('Account balance updated.', 'success');
 }
 
 // Dynamically fits stat-card numbers to avoid horizontal overflow.
@@ -592,7 +716,14 @@ function calcHealthScore() {
   const goalProg     = App.goals.length > 0
     ? (App.goals.reduce((s, g) => s + Math.min(+g.current_amount / +g.target_amount, 1), 0) / App.goals.length) * 100
     : 50;
-  const emergency = App.goals.some(g => g.name.toLowerCase().includes('emergency')) ? 10 : 0;
+  // Emergency buffer. A stated account balance measures this directly — six
+  // months of expenses covered earns the full 10 — and we take whichever of
+  // the two signals is kinder, so entering a balance can never cost points.
+  const runway    = balanceRunway();
+  const emergency = Math.max(
+    App.goals.some(g => g.name.toLowerCase().includes('emergency')) ? 10 : 0,
+    runway == null ? 0 : Math.min(runway / 6, 1) * 10
+  );
 
   let score = 0;
   score += Math.min(savingsRate * 1.4, 35);
@@ -654,8 +785,16 @@ function renderHealthScore(score) {
         'Even saving $50/month builds a habit — start small but start now.',
       ];
 
+  // The most useful thing we can say sits at the top, when the balance is known.
+  const runway = balanceRunway();
+  const lead   = runway == null ? null
+    : runway < 1  ? 'Your balance covers under a month of spending — rebuilding a buffer is the priority.'
+    : runway < 3  ? `Your balance covers about ${runway.toFixed(1)} months. Aim for 3 before anything else.`
+    : runway < 6  ? `Your balance covers about ${runway.toFixed(1)} months. Push it to 6 for a full emergency fund.`
+    : 'Your balance already covers 6+ months of spending — put the surplus to work.';
+
   const tipsEl = document.getElementById('health-tips');
-  if (tipsEl) tipsEl.innerHTML = tips.map(t => `<li>${t}</li>`).join('');
+  if (tipsEl) tipsEl.innerHTML = (lead ? [lead, ...tips.slice(0, 4)] : tips).map(t => `<li>${t}</li>`).join('');
 }
 
 function renderExpensePieChart(transactions) {
@@ -768,20 +907,18 @@ function renderGoalsOverview() {
 
 // ── VAULT ────────────────────────────────────────────────────
 function renderVault() {
-  populateCategoryDropdowns();
   renderTransactionTable();
   renderGoalsList();
   renderRecurringList();
 }
 
 function getFilteredTransactions() {
-  const { month, year, category, type } = App.filters;
+  const { month, year, type } = App.filters;
   return App.transactions.filter(t => {
     const d = new Date(t.date);
-    if (month !== '' && d.getMonth() !== +month)    return false;
-    if (year  !== '' && d.getFullYear() !== +year)  return false;
-    if (category     && t.category !== category)    return false;
-    if (type         && t.type !== type)            return false;
+    if (month !== '' && d.getMonth() !== +month)   return false;
+    if (year  !== '' && d.getFullYear() !== +year) return false;
+    if (type         && t.type !== type)           return false;
     return true;
   });
 }
@@ -819,23 +956,14 @@ function setupFilterListeners() {
     yearEl.dataset.populated = '1';
   }
 
-  ['filter-month','filter-year','filter-category','filter-type'].forEach(id => {
+  ['filter-month','filter-year','filter-type'].forEach(id => {
     document.getElementById(id)?.addEventListener('change', () => {
-      App.filters.month    = document.getElementById('filter-month')?.value    || '';
-      App.filters.year     = document.getElementById('filter-year')?.value     || '';
-      App.filters.category = document.getElementById('filter-category')?.value || '';
-      App.filters.type     = document.getElementById('filter-type')?.value     || '';
+      App.filters.month = document.getElementById('filter-month')?.value || '';
+      App.filters.year  = document.getElementById('filter-year')?.value  || '';
+      App.filters.type  = document.getElementById('filter-type')?.value  || '';
       renderTransactionTable();
     });
   });
-}
-
-function populateCategoryDropdowns() {
-  const filterEl = document.getElementById('filter-category');
-  if (filterEl) {
-    filterEl.innerHTML = '<option value="">All Categories</option>' +
-      App.categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
-  }
 }
 
 // Add / Edit Transaction
@@ -2244,6 +2372,7 @@ function updateAmountLabels() {
     'lbl-rec-amount':       `Amount (${sym}) *`,
     'lbl-sim-income':       `Monthly Income (${sym})`,
     'lbl-compare-income':   `Monthly Income (${sym})`,
+    'lbl-balance-input':    `Update balance (${sym})`,
   };
   Object.entries(map).forEach(([id, text]) => {
     const el = document.getElementById(id);

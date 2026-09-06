@@ -303,6 +303,86 @@ body {
 }
 
 /* ── Stats Grid ──────────────────────────────────────────── */
+.balance-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px 28px;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.balance-main {
+  min-width: 0;
+}
+
+.balance-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.balance-value {
+  font-size: 2.1rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+
+.balance-value.negative {
+  color: var(--danger);
+}
+
+.balance-meta,
+.balance-runway {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  margin-top: 8px;
+  line-height: 1.5;
+}
+
+.balance-runway {
+  color: var(--text-muted);
+}
+
+.balance-form {
+  min-width: 240px;
+}
+
+.balance-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.balance-input-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.balance-input-row .btn {
+  flex: none;
+}
+
+.balance-hint {
+  font-size: 0.71rem;
+  color: var(--text-dim);
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+@media (max-width: 640px) {
+  .balance-card {
+    grid-template-columns: 1fr;
+  }
+
+  .balance-form {
+    min-width: 0;
+  }
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));

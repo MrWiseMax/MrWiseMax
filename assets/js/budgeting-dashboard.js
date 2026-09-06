@@ -277,7 +277,9 @@ async function initDashboard() {
   await backfillCurrencies();
 
   renderUserInfo(); // Re-render with full profile data (nickname + custom avatar)
-  processRecurringTransactions(); // auto-post any pending monthly entries
+  // Awaited: this can add transactions, and the first render below needs to
+  // include them rather than showing an empty month until the next visit.
+  await processRecurringTransactions();
 
   initCurrencyInputs();
   // Enter in either field of an account row saves that row.
@@ -2250,9 +2252,38 @@ async function saveProfile() {
 
 // Posts every month an entry owes, from its chosen start month up to now.
 // Pick "starting from June" in September and June, July and August are filled
-// in too; nothing before the start month is ever posted, and nothing already
-// posted is posted twice.
+// in too, and nothing before the start month is ever posted.
+//
+// The month counter (last_posted_*) says how far the schedule got, but it is
+// not proof: a posting can be deleted, or the start month moved backwards.
+// So each month is checked against the ledger before it is written, which
+// makes the whole thing self-correcting — a missing month reappears, and a
+// month already there is never written twice.
 const RECURRING_MAX_CATCHUP = 24;   // months, so a stale entry cannot flood the ledger
+
+// The months a schedule has actually put on the ledger, as 'YYYY-MM'.
+function postedMonthsFor(r) {
+  const months = new Set();
+  const key    = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+  const add = (dateStr, legacy) => {
+    const d = new Date(String(dateStr).slice(0, 10) + 'T12:00:00');
+    if (isNaN(d)) return;
+    months.add(key(d));
+    // Postings made before the date fix could land on the last day of the
+    // month before the one they were meant for; count those too.
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    if (legacy && d.getDate() === lastDay) months.add(key(new Date(d.getFullYear(), d.getMonth() + 1, 1)));
+  };
+
+  (App.transactions || []).forEach(t => {
+    if (t.recurring_id === r.id) add(t.date, false);
+    // Rows posted before transactions recorded which schedule made them are
+    // matched on their shape instead.
+    else if (!t.recurring_id && t.type === r.type && t.category === r.category && +t.amount === +r.amount) add(t.date, true);
+  });
+  return months;
+}
 
 async function processRecurringTransactions() {
   const now      = new Date();
@@ -2260,64 +2291,99 @@ async function processRecurringTransactions() {
   const curMonth = now.getMonth() + 1;   // 1-12
   const today    = now.getDate();
 
-  const due = [];
+  const due     = [];          // months that need writing
+  const reached = new Map();   // recurring id -> the last month accounted for
+  const mark = (id, year, month) => {
+    const cur = reached.get(id);
+    if (!cur || year * 12 + month > cur.year * 12 + cur.month) reached.set(id, { year, month });
+  };
+
   for (const r of App.recurring) {
     if (!r.is_active) continue;
 
     const start = r.starts_on ? { y: +String(r.starts_on).slice(0, 4), m: +String(r.starts_on).slice(5, 7) } : null;
 
-    // Resume after the last month posted; otherwise begin at the chosen start
-    // month, or this month for entries that never picked one.
+    // With a start month the scan always begins there and the ledger decides
+    // what is missing — that is what lets a hole be noticed and filled. The
+    // counter only picks the starting point for schedules with no start month,
+    // which is how every entry behaved before start months existed.
     let y, m;
-    if (r.last_posted_year) {
+    if (start) {
+      ({ y, m } = start);
+    } else if (r.last_posted_year) {
       y = r.last_posted_year;
       m = r.last_posted_month + 1;
       if (m > 12) { m = 1; y++; }
-    } else if (start) {
-      ({ y, m } = start);
     } else {
       y = curYear; m = curMonth;
     }
 
-    // Never reach back past the start month.
-    if (start && (y < start.y || (y === start.y && m < start.m))) ({ y, m } = start);
+    // However far back the start month is, never scan past the catch-up window.
+    let earliestY = curYear;
+    let earliestM = curMonth - RECURRING_MAX_CATCHUP + 1;
+    while (earliestM < 1) { earliestM += 12; earliestY--; }
+    if (y * 12 + m < earliestY * 12 + earliestM) { y = earliestY; m = earliestM; }
 
+    const already = postedMonthsFor(r);
     for (let guard = 0; guard < RECURRING_MAX_CATCHUP; guard++) {
       if (y > curYear || (y === curYear && m > curMonth)) break;
       // The current month waits until its day arrives.
       if (y === curYear && m === curMonth && today < r.day_of_month) break;
-      due.push({ r, year: y, month: m });
+      if (already.has(`${y}-${String(m).padStart(2, '0')}`)) mark(r.id, y, m);   // already on the ledger
+      else due.push({ r, year: y, month: m });
       m++; if (m > 12) { m = 1; y++; }
     }
   }
 
-  if (!due.length) return;
-
-  const posted = new Map();   // recurring id -> the latest month posted for it
-  const done   = [];          // the months that actually landed
+  const done   = [];   // months that landed
+  const failed = [];
   for (const { r, year, month } of due) {
     const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(r.day_of_month).padStart(2, '0')}`;
     const { error } = await db.from('transactions').insert([{
-      user_id:     App.user.id,
-      type:        r.type,
-      category:    r.category,
-      description: r.description || r.category,
-      amount:      r.amount,
+      user_id:      App.user.id,
+      recurring_id: r.id,
+      type:         r.type,
+      category:     r.category,
+      description:  r.description || r.category,
+      amount:       r.amount,
       // Posted in the currency the recurring entry was created in, not the
       // one the user happens to be viewing when it fires.
-      currency:    r.currency || CurrencySettings.main.code,
-      date:        dateStr,
+      currency:     r.currency || CurrencySettings.main.code,
+      date:         dateStr,
     }]);
-    if (!error) { posted.set(r.id, { month, year }); done.push(year * 12 + month); }
+    if (error) {
+      // Never pass over this quietly: a swallowed failure here looks exactly
+      // like a schedule that simply never ran.
+      console.warn('[Recurring] Could not post', r.category, dateStr, '-', error.message);
+      failed.push(r.category);
+      continue;
+    }
+    mark(r.id, year, month);
+    done.push(year * 12 + month);
   }
 
-  if (!posted.size) return;
+  // Move each schedule's counter to the last month accounted for — written
+  // now, or found already on the ledger.
+  const moves = [...reached].filter(([id, { year, month }]) => {
+    const r = App.recurring.find(x => x.id === id);
+    return r && (r.last_posted_year !== year || r.last_posted_month !== month);
+  });
+  if (moves.length) {
+    await Promise.all(moves.map(([id, { year, month }]) =>
+      db.from('recurring_transactions')
+        .update({ last_posted_month: month, last_posted_year: year })
+        .eq('id', id).eq('user_id', App.user.id)
+    ));
+  }
 
-  await Promise.all([...posted].map(([id, { month, year }]) =>
-    db.from('recurring_transactions')
-      .update({ last_posted_month: month, last_posted_year: year })
-      .eq('id', id).eq('user_id', App.user.id)
-  ));
+  if (failed.length) {
+    UI.toast(`Could not post ${failed.length} recurring transaction${failed.length > 1 ? 's' : ''} (${[...new Set(failed)].join(', ')}).`, 'error', 7000);
+  }
+
+  if (!done.length) {
+    if (moves.length) await loadRecurring();
+    return false;
+  }
 
   await Promise.all([loadTransactions(), loadRecurring()]);
 
@@ -2328,6 +2394,7 @@ async function processRecurringTransactions() {
   const range = hi > lo ? ` (${label(lo)} to ${label(hi)})` : '';
   const n     = done.length;
   UI.toast(`${n} recurring transaction${n > 1 ? 's' : ''} posted${range}.`, 'info');
+  return true;
 }
 
 function renderRecurringList() {
@@ -2448,6 +2515,7 @@ async function saveRecurring() {
     // Stored as the first of the chosen month; the schedule runs from there.
     starts_on: start ? `${start}-01` : null,
   };
+
   let error;
   if (App.editing.recurring) {
     ({ error } = await db.from('recurring_transactions').update(payload).eq('id', App.editing.recurring.id).eq('user_id', App.user.id));

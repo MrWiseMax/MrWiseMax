@@ -111,16 +111,14 @@
               <div class="balance-meta" id="balance-meta"></div>
               <div class="balance-runway" id="balance-runway"></div>
             </div>
-            <form class="balance-form" onsubmit="saveAccountBalance(event)">
-              <label class="label" id="lbl-balance-input" for="balance-input">Update balance ($)</label>
-              <div class="balance-input-row">
-                <input type="text" inputmode="decimal" class="input fmt-currency" id="balance-input"
-                  placeholder="0" autocomplete="off">
-                <button class="btn btn-primary" type="submit" id="balance-save-btn">Save</button>
-              </div>
-              <div class="balance-hint">What is in your account right now. Everything you log from
-                here on updates it automatically.</div>
-            </form>
+            <div class="balance-form">
+              <div class="balance-form-label" id="lbl-balance-input">Your accounts ($)</div>
+              <div class="balance-accounts" id="balance-accounts"></div>
+              <button class="btn btn-ghost btn-sm balance-add-btn" type="button"
+                onclick="addBalanceAccountRow()">+ Add account</button>
+              <div class="balance-hint">Name each account and enter what is in it now — the app adds
+                them up. Everything you log from here on updates the total automatically.</div>
+            </div>
           </div>
 
           <!-- Stats -->
@@ -969,9 +967,8 @@
         <button class="modal-close" onclick="UI.closeModal('recurring-modal')">✕</button>
       </div>
       <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:18px">
-        This will automatically post a transaction on the selected day every month,
-        <br>(e.g. salary on the 1st, rent on the
-        5th).
+        This posts a transaction on the chosen day every month (e.g. salary on the 1st, rent on the
+        5th). Pick a start month in the past and the months since are filled in for you.
       </p>
       <div class="form-group">
         <label class="label">Type *</label>
@@ -980,15 +977,21 @@
           <option value="expense">Expense</option>
         </select>
       </div>
+      <div class="form-group">
+        <label class="label" id="lbl-rec-amount">Amount ($) *</label>
+        <input type="text" inputmode="decimal" class="input fmt-currency" id="rec-amount" placeholder="0.00">
+      </div>
       <div class="input-row">
-        <div class="form-group">
-          <label class="label" id="lbl-rec-amount">Amount ($) *</label>
-          <input type="text" inputmode="decimal" class="input fmt-currency" id="rec-amount" placeholder="0.00">
-        </div>
         <div class="form-group">
           <label class="label">Day of Month *</label>
           <select class="input" id="rec-day">
             <!-- 1–28 populated below -->
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="label">Starting From *</label>
+          <select class="input" id="rec-start">
+            <!-- months populated below -->
           </select>
         </div>
       </div>

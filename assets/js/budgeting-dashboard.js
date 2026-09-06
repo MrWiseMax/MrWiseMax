@@ -6,7 +6,7 @@
 const App = {
   user: null,
   profile: null,
-  balance: null,
+  balances: [],
   transactions: [],
   categories: [],
   plans: [],
@@ -193,7 +193,7 @@ const Money = {
     const codes = [CurrencySettings.main.code, 'USD'];
     [App.transactions, App.recurring, App.goals, App.plans].forEach(list =>
       (list || []).forEach(row => { if (row.currency) codes.push(row.currency); }));
-    if (App.balance?.currency) codes.push(App.balance.currency);
+    (App.balances || []).forEach(a => { if (a.currency) codes.push(a.currency); });
     return codes;
   },
 };
@@ -235,8 +235,11 @@ const Fmt = {
   },
 };
 
+// Safe to call again after rendering new inputs — already-wired ones are skipped.
 function initCurrencyInputs() {
   document.querySelectorAll('.fmt-currency').forEach(el => {
+    if (el.dataset.fmtWired) return;
+    el.dataset.fmtWired = '1';
     el.addEventListener('input', () => {
       const start  = el.selectionStart;
       const before = el.value.length;
@@ -266,7 +269,7 @@ async function initDashboard() {
   document.getElementById('page-loader').style.display = 'none';
   renderUserInfo();
 
-  await Promise.all([loadProfile(), loadCategories(), loadTransactions(), loadPlans(), loadGoals(), loadRecurring(), loadBalance()]);
+  await Promise.all([loadProfile(), loadCategories(), loadTransactions(), loadPlans(), loadGoals(), loadRecurring(), loadBalances()]);
 
   // Rates must be in place before anything renders: every amount is converted
   // from the currency it was saved in into the one being displayed.
@@ -277,6 +280,14 @@ async function initDashboard() {
   processRecurringTransactions(); // auto-post any pending monthly entries
 
   initCurrencyInputs();
+  // Enter in either field of an account row saves that row.
+  document.getElementById('balance-accounts')?.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const row = e.target.closest?.('.balance-account');
+    if (!row) return;
+    e.preventDefault();
+    saveBalanceAccount(row.querySelector('.save-btn'));
+  });
   navigateTo('overview');
   NavHistory.init();
   setupNavigation();
@@ -457,7 +468,7 @@ async function loadCategories()   { const { data } = await db.from('categories')
 async function loadTransactions() { const { data } = await db.from('transactions').select('*').eq('user_id', App.user.id).order('date', { ascending: false }); if (data) App.transactions = data; }
 async function loadPlans()        { const { data } = await db.from('budget_plans').select('*').eq('user_id', App.user.id).order('created_at', { ascending: false }); if (data) App.plans = data; }
 async function loadGoals()        { const { data } = await db.from('savings_goals').select('*').eq('user_id', App.user.id).order('created_at', { ascending: false }); if (data) App.goals = data; }
-async function loadBalance()      { const { data } = await db.from('account_balance').select('*').eq('user_id', App.user.id).maybeSingle(); App.balance = data || null; }
+async function loadBalances()     { const { data } = await db.from('account_balance').select('*').eq('user_id', App.user.id).order('sort_order').order('name'); App.balances = data || []; }
 
 async function loadUserInteractions() {
   const [l, s] = await Promise.all([
@@ -509,28 +520,43 @@ function renderOverview() {
   requestAnimationFrame(() => requestAnimationFrame(fitStatCardValues));
 }
 
-// ── ACCOUNT BALANCE ──────────────────────────────────────────
-// The user tells the app what is in their account; we store that figure as an
-// anchor — true as of the moment they saved it — and add everything they log
-// afterwards on top. The number then stays right without being re-typed.
+// ── ACCOUNT BALANCES ─────────────────────────────────────────
+// The user names each account they hold and says what is in it. Each figure is
+// an anchor — true at the moment it was saved — and everything logged after the
+// newest anchor is added on top of the combined total, so the number stays
+// right without being re-typed.
 
-// Transactions recorded after the anchor: the ones the stated balance cannot
-// already account for. Keyed on created_at, not the transaction date, so a
-// coffee logged five minutes from now counts immediately.
+// The most recent confirmation across every account. Transactions after it are
+// the ones no stated figure can already include.
+function balanceAnchor() {
+  let newest = null;
+  (App.balances || []).forEach(a => {
+    if (!newest || new Date(a.as_of) > new Date(newest)) newest = a.as_of;
+  });
+  return newest;
+}
+
+// Transactions recorded after that moment. Keyed on created_at, not the
+// transaction date, so a coffee logged five minutes from now counts at once.
 function txSinceBalance() {
-  const asOf = App.balance?.as_of;
+  const asOf = balanceAnchor();
   if (!asOf) return [];
   const cut = new Date(asOf).getTime();
   return App.transactions.filter(t => t.created_at && new Date(t.created_at).getTime() > cut);
 }
 
-// The anchor plus everything since, in the currency currently on screen.
-// null when the user has not set a balance yet.
+// Every account added up, each converted from its own currency into the one
+// on screen.
+function balancesTotal() {
+  return (App.balances || []).reduce((s, a) => s + Money.toActive(a.balance, a.currency), 0);
+}
+
+// The combined total plus everything since. null until an account exists.
 function liveBalance() {
-  if (!App.balance) return null;
+  if (!App.balances?.length) return null;
   return txSinceBalance().reduce(
     (sum, t) => sum + (t.type === 'income' ? 1 : -1) * Money.toActive(t.amount, t.currency),
-    Money.toActive(App.balance.balance, App.balance.currency)
+    balancesTotal()
   );
 }
 
@@ -556,6 +582,8 @@ function balanceRunway() {
 function renderBalanceCard() {
   const valueEl = document.getElementById('balance-value');
   if (!valueEl) return;
+  renderBalanceAccounts();
+
   const metaEl   = document.getElementById('balance-meta');
   const runwayEl = document.getElementById('balance-runway');
   const live     = liveBalance();
@@ -563,7 +591,7 @@ function renderBalanceCard() {
   if (live == null) {
     valueEl.textContent = '\u2014';
     valueEl.classList.remove('negative');
-    if (metaEl)   metaEl.textContent = 'Not set yet — enter it once and the app keeps it current for you.';
+    if (metaEl)   metaEl.textContent = 'Name an account below and the app keeps the total current for you.';
     if (runwayEl) runwayEl.textContent = '';
     return;
   }
@@ -571,16 +599,18 @@ function renderBalanceCard() {
   valueEl.textContent = UI.currency(live);
   valueEl.classList.toggle('negative', live < 0);
 
-  const anchor = Money.toActive(App.balance.balance, App.balance.currency);
+  const total  = balancesTotal();
+  const count  = App.balances.length;
   const since  = txSinceBalance();
-  const change = live - anchor;
-  const when   = UI.formatDate(String(App.balance.as_of).slice(0, 10));
+  const change = live - total;
+  const when   = UI.formatDate(String(balanceAnchor()).slice(0, 10));
+  const from   = count > 1 ? `${UI.currency(total)} across ${count} accounts` : UI.currency(total);
 
   if (metaEl) {
     metaEl.textContent = since.length
-      ? `${UI.currency(anchor)} on ${when}, ${change < 0 ? '−' : '+'}${UI.currency(Math.abs(change))} ` +
+      ? `${from}, confirmed ${when}, ${change < 0 ? '−' : '+'}${UI.currency(Math.abs(change))} ` +
         `from ${since.length} transaction${since.length === 1 ? '' : 's'} logged since.`
-      : `Set to ${UI.currency(anchor)} on ${when}.`;
+      : `${from}, confirmed ${when}.`;
   }
 
   if (runwayEl) {
@@ -596,37 +626,102 @@ function renderBalanceCard() {
   }
 }
 
-async function saveAccountBalance(event) {
-  event?.preventDefault();
-  const inputEl = document.getElementById('balance-input');
-  const raw     = (inputEl?.value || '').trim();
-  if (!raw) { UI.toast('Enter the balance that is in your account right now.', 'error'); return; }
+// One editable row per account. An account not confirmed in a month is called
+// out, since a stale figure quietly drags the whole total off.
+function renderBalanceAccounts() {
+  const el = document.getElementById('balance-accounts');
+  if (!el) return;
 
+  // Never throw away a row the user is halfway through typing.
+  const draft = el.querySelector('.balance-account.is-new');
+
+  el.innerHTML = (App.balances || []).map(a => {
+    const stale = (Date.now() - new Date(a.as_of).getTime()) > 30 * 86400000;
+    return `
+      <div class="balance-account" data-id="${a.id}">
+        <input class="input balance-account-name" maxlength="40" placeholder="Bank name" aria-label="Account name">
+        <input class="input fmt-currency balance-account-amount" inputmode="decimal" placeholder="0"
+          aria-label="Balance" value="${Fmt.set(Money.toActive(a.balance, a.currency))}">
+        <button class="icon-btn save-btn" title="Save" onclick="saveBalanceAccount(this)">✓</button>
+        <button class="icon-btn del-btn" title="Remove account" onclick="removeBalanceAccount('${a.id}')">✕</button>
+        <div class="balance-account-meta${stale ? ' stale' : ''}">${stale ? 'Not confirmed since ' : 'Confirmed '}${UI.formatDate(String(a.as_of).slice(0, 10))}</div>
+      </div>`;
+  }).join('');
+
+  // Names are user text — assigned, never interpolated into markup.
+  const byId = Object.fromEntries((App.balances || []).map(a => [a.id, a]));
+  el.querySelectorAll('.balance-account[data-id]').forEach(row => {
+    row.querySelector('.balance-account-name').value = byId[row.dataset.id]?.name || '';
+  });
+
+  if (draft) el.appendChild(draft);
+  else if (!App.balances?.length) el.appendChild(newBalanceAccountRow());
+  initCurrencyInputs();
+}
+
+function newBalanceAccountRow() {
+  const row = document.createElement('div');
+  row.className = 'balance-account is-new';
+  row.innerHTML = `
+    <input class="input balance-account-name" maxlength="40" placeholder="Bank name" aria-label="Account name">
+    <input class="input fmt-currency balance-account-amount" inputmode="decimal" placeholder="0" aria-label="Balance">
+    <button class="icon-btn save-btn" title="Save" onclick="saveBalanceAccount(this)">✓</button>
+    <button class="icon-btn del-btn" title="Discard" onclick="this.closest('.balance-account').remove()">✕</button>
+    <div class="balance-account-meta">Not saved yet</div>`;
+  return row;
+}
+
+function addBalanceAccountRow() {
+  const el = document.getElementById('balance-accounts');
+  if (!el) return;
+  let row = el.querySelector('.balance-account.is-new');
+  if (!row) {
+    row = newBalanceAccountRow();
+    el.appendChild(row);
+    initCurrencyInputs();
+  }
+  row.querySelector('.balance-account-name').focus();
+}
+
+async function saveBalanceAccount(btn) {
+  const row  = btn.closest('.balance-account');
+  if (!row) return;
+  const id   = row.dataset.id || null;
+  const name = row.querySelector('.balance-account-name').value.trim();
+  const raw  = row.querySelector('.balance-account-amount').value.trim();
+
+  if (!name) { UI.toast('Give the account a name — your bank, for instance.', 'error'); return; }
+  if (!raw)  { UI.toast('Enter what is in this account right now.', 'error'); return; }
   const amount = Fmt.get(raw);
   if (isNaN(amount)) { UI.toast('That does not look like a number.', 'error'); return; }
 
-  const btn = document.getElementById('balance-save-btn');
   UI.setLoading(btn, true);
-
   // Recorded in the currency on screen, like every other amount, and stamped
-  // now — everything logged after this moment moves the balance on its own.
-  const now = new Date().toISOString();
-  const { error } = await db.from('account_balance').upsert({
-    user_id:    App.user.id,
-    balance:    amount,
-    currency:   CurrencySettings.activeCode,
-    as_of:      now,
-    updated_at: now,
-  }, { onConflict: 'user_id' });
-
+  // now — everything logged after this moment moves the total on its own.
+  const now     = new Date().toISOString();
+  const payload = { name, balance: amount, currency: CurrencySettings.activeCode, as_of: now, updated_at: now };
+  const { error } = id
+    ? await db.from('account_balance').update(payload).eq('id', id).eq('user_id', App.user.id)
+    : await db.from('account_balance').insert([{ ...payload, user_id: App.user.id, sort_order: App.balances.length }]);
   UI.setLoading(btn, false);
   if (error) { UI.toast(error.message, 'error'); return; }
 
-  if (inputEl) inputEl.value = '';
-  await loadBalance();
+  row.classList.remove('is-new');
+  await loadBalances();
   await CurrencySettings.ensureRates(Money.usedCodes());
   renderOverview();
-  UI.toast('Account balance updated.', 'success');
+  UI.toast(`${name} updated.`, 'success');
+}
+
+async function removeBalanceAccount(id) {
+  const account = App.balances.find(a => a.id === id);
+  UI.confirm(`Remove ${account?.name || 'this account'} from your balance?`, async () => {
+    const { error } = await db.from('account_balance').delete().eq('id', id).eq('user_id', App.user.id);
+    if (error) { UI.toast(error.message, 'error'); return; }
+    await loadBalances();
+    renderOverview();
+    UI.toast('Account removed.', 'success');
+  });
 }
 
 // Dynamically fits stat-card numbers to avoid horizontal overflow.
@@ -1046,9 +1141,12 @@ function initCategoryCombo(inputId, suggestionsId, categories, selected) {
     freshBox.classList.remove('open');
   });
 
-  document.addEventListener('click', e => {
-    if (!freshInput.parentNode.contains(e.target)) freshBox.classList.remove('open');
-  });
+  const onDocumentClick = e => {
+    const parent = freshInput.parentNode;
+    if (!parent) { document.removeEventListener('click', onDocumentClick); return; }
+    if (!parent.contains(e.target)) freshBox.classList.remove('open');
+  };
+  document.addEventListener('click', onDocumentClick);
 }
 
 const TX_CATEGORY_OPTIONS = {
@@ -2150,26 +2248,55 @@ async function saveProfile() {
 
 // ── RECURRING TRANSACTIONS ───────────────────────────────────
 
+// Posts every month an entry owes, from its chosen start month up to now.
+// Pick "starting from June" in September and June, July and August are filled
+// in too; nothing before the start month is ever posted, and nothing already
+// posted is posted twice.
+const RECURRING_MAX_CATCHUP = 24;   // months, so a stale entry cannot flood the ledger
+
 async function processRecurringTransactions() {
-  const now   = new Date();
-  const year  = now.getFullYear();
-  const month = now.getMonth() + 1; // 1-12
-  const today = now.getDate();
+  const now      = new Date();
+  const curYear  = now.getFullYear();
+  const curMonth = now.getMonth() + 1;   // 1-12
+  const today    = now.getDate();
 
-  const pending = App.recurring.filter(r =>
-    r.is_active &&
-    (r.last_posted_year === null || r.last_posted_year === undefined ||
-     r.last_posted_year < year ||
-     (r.last_posted_year === year && r.last_posted_month < month)) &&
-    today >= r.day_of_month
-  );
+  const due = [];
+  for (const r of App.recurring) {
+    if (!r.is_active) continue;
 
-  if (!pending.length) return;
+    const start = r.starts_on ? { y: +String(r.starts_on).slice(0, 4), m: +String(r.starts_on).slice(5, 7) } : null;
 
-  for (const r of pending) {
-    const postDate = new Date(year, month - 1, r.day_of_month);
-    const dateStr  = postDate.toISOString().split('T')[0];
+    // Resume after the last month posted; otherwise begin at the chosen start
+    // month, or this month for entries that never picked one.
+    let y, m;
+    if (r.last_posted_year) {
+      y = r.last_posted_year;
+      m = r.last_posted_month + 1;
+      if (m > 12) { m = 1; y++; }
+    } else if (start) {
+      ({ y, m } = start);
+    } else {
+      y = curYear; m = curMonth;
+    }
 
+    // Never reach back past the start month.
+    if (start && (y < start.y || (y === start.y && m < start.m))) ({ y, m } = start);
+
+    for (let guard = 0; guard < RECURRING_MAX_CATCHUP; guard++) {
+      if (y > curYear || (y === curYear && m > curMonth)) break;
+      // The current month waits until its day arrives.
+      if (y === curYear && m === curMonth && today < r.day_of_month) break;
+      due.push({ r, year: y, month: m });
+      m++; if (m > 12) { m = 1; y++; }
+    }
+  }
+
+  if (!due.length) return;
+
+  const posted = new Map();   // recurring id -> the latest month posted for it
+  const done   = [];          // the months that actually landed
+  for (const { r, year, month } of due) {
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(r.day_of_month).padStart(2, '0')}`;
     const { error } = await db.from('transactions').insert([{
       user_id:     App.user.id,
       type:        r.type,
@@ -2181,18 +2308,26 @@ async function processRecurringTransactions() {
       currency:    r.currency || CurrencySettings.main.code,
       date:        dateStr,
     }]);
-
-    if (!error) {
-      await db.from('recurring_transactions')
-        .update({ last_posted_month: month, last_posted_year: year })
-        .eq('id', r.id);
-    }
+    if (!error) { posted.set(r.id, { month, year }); done.push(year * 12 + month); }
   }
 
-  if (pending.length) {
-    await loadTransactions();
-    UI.toast(`${pending.length} recurring transaction${pending.length > 1 ? 's' : ''} posted for this month.`, 'info');
-  }
+  if (!posted.size) return;
+
+  await Promise.all([...posted].map(([id, { month, year }]) =>
+    db.from('recurring_transactions')
+      .update({ last_posted_month: month, last_posted_year: year })
+      .eq('id', id).eq('user_id', App.user.id)
+  ));
+
+  await Promise.all([loadTransactions(), loadRecurring()]);
+
+  // Name the span only when it covers more than a single month.
+  const lo    = Math.min(...done);
+  const hi    = Math.max(...done);
+  const label = k => `${UI.monthName((k - 1) % 12)} ${Math.floor((k - 1) / 12)}`;
+  const range = hi > lo ? ` (${label(lo)} to ${label(hi)})` : '';
+  const n     = done.length;
+  UI.toast(`${n} recurring transaction${n > 1 ? 's' : ''} posted${range}.`, 'info');
 }
 
 function renderRecurringList() {
@@ -2204,11 +2339,14 @@ function renderRecurringList() {
     return;
   }
   el.innerHTML = App.recurring.map(r => `
-    <div class="recurring-row ${!r.is_active ? 'inactive' : ''}">
+    <div class="recurring-row ${!r.is_active ? 'inactive' : ''}" data-id="${r.id}">
       <div class="recurring-icon ${r.type}">${r.type === 'income' ? '↑' : '↓'}</div>
       <div class="recurring-info">
         <span class="recurring-desc">${r.description || r.category}</span>
-        <span class="recurring-meta">${r.category} · Day ${r.day_of_month} of each month</span>
+        <span class="recurring-sub">
+          <span class="recurring-meta">${r.category} · Day ${r.day_of_month} of each month${recurringStartLabel(r)}</span>
+          <span class="recurring-status">Paused</span>
+        </span>
       </div>
       <div class="recurring-footer">
         <span class="recurring-amount ${r.type}">${r.type === 'income' ? '+' : '-'}${Money.fmt(r.amount, r.currency)}</span>
@@ -2221,6 +2359,36 @@ function renderRecurringList() {
     </div>`).join('');
 }
 
+// A year back through three months ahead — enough to backfill a schedule that
+// has been running a while, or to line one up before it starts.
+function populateRecurringStartMonths(selected) {
+  const el = document.getElementById('rec-start');
+  if (!el) return;
+  const now  = new Date();
+  const opts = [];
+  let found  = false;
+  for (let i = -12; i <= 3; i++) {
+    const d     = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (value === selected) found = true;
+    opts.push(`<option value="${value}">${d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</option>`);
+  }
+  // An entry that started further back than the list reaches keeps its month.
+  if (selected && !found) {
+    const d = new Date(+selected.slice(0, 4), +selected.slice(5, 7) - 1, 1);
+    opts.unshift(`<option value="${selected}">${d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</option>`);
+  }
+  el.innerHTML = opts.join('');
+  el.value = selected || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// " · from Jun 2026", once a start month has been chosen.
+function recurringStartLabel(r) {
+  if (!r.starts_on) return '';
+  const d = new Date(String(r.starts_on).slice(0, 10) + 'T00:00:00');
+  return ` · from ${d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`;
+}
+
 function openAddRecurring() {
   App.editing.recurring = null;
   document.getElementById('rec-modal-title').textContent = 'Add Recurring Entry';
@@ -2228,6 +2396,7 @@ function openAddRecurring() {
   document.getElementById('rec-amount').value      = '';
   document.getElementById('rec-description').value = '';
   document.getElementById('rec-day').value         = '1';
+  populateRecurringStartMonths('');
   populateRecurringCategoryDropdown('income', '');
   const recTypeEl = document.getElementById('rec-type');
   if (!recTypeEl.dataset.wired) {
@@ -2246,6 +2415,7 @@ function openEditRecurring(id) {
   document.getElementById('rec-amount').value      = Fmt.set(Money.toActive(r.amount, r.currency));
   document.getElementById('rec-description').value = r.description || '';
   document.getElementById('rec-day').value         = r.day_of_month;
+  populateRecurringStartMonths(r.starts_on ? String(r.starts_on).slice(0, 7) : '');
   populateRecurringCategoryDropdown(r.type, r.category);
   UI.openModal('recurring-modal');
 }
@@ -2267,11 +2437,17 @@ async function saveRecurring() {
   const category    = document.getElementById('rec-category').value;
   const description = document.getElementById('rec-description').value.trim();
   const day         = parseInt(document.getElementById('rec-day').value) || 1;
+  const start       = document.getElementById('rec-start').value;   // 'YYYY-MM'
 
   if (!type || !amount || !category) { UI.toast('Type, amount and category are required.', 'error'); return; }
   if (isNaN(amount) || amount <= 0)  { UI.toast('Amount must be a positive number.', 'error'); return; }
 
-  const payload = { user_id: App.user.id, type, amount, category, description, day_of_month: day, currency: CurrencySettings.activeCode };
+  const payload = {
+    user_id: App.user.id, type, amount, category, description, day_of_month: day,
+    currency: CurrencySettings.activeCode,
+    // Stored as the first of the chosen month; the schedule runs from there.
+    starts_on: start ? `${start}-01` : null,
+  };
   let error;
   if (App.editing.recurring) {
     ({ error } = await db.from('recurring_transactions').update(payload).eq('id', App.editing.recurring.id).eq('user_id', App.user.id));
@@ -2283,12 +2459,46 @@ async function saveRecurring() {
   UI.closeModal('recurring-modal');
   await loadRecurring();
   renderRecurringList();
+  // Fill in any months the new schedule already owes, rather than waiting for
+  // the next visit.
+  await processRecurringTransactions();
+  renderRecurringList();
+  if (App.activeSection === 'overview') renderOverview();
 }
 
 async function toggleRecurring(id, isActive) {
-  await db.from('recurring_transactions').update({ is_active: !isActive }).eq('id', id).eq('user_id', App.user.id);
-  await loadRecurring(); renderRecurringList();
-  UI.toast(isActive ? 'Paused.' : 'Resumed.', 'info');
+  const next = !isActive;
+  // Flip the row we already have rather than re-rendering the list: a repaint
+  // would land on the finished state with nothing to fade between.
+  applyRecurringState(id, next);
+
+  const { error } = await db.from('recurring_transactions')
+    .update({ is_active: next }).eq('id', id).eq('user_id', App.user.id);
+
+  if (error) {
+    applyRecurringState(id, isActive);
+    UI.toast(error.message, 'error');
+    return;
+  }
+  const r = App.recurring.find(x => x.id === id);
+  if (r) r.is_active = next;
+  UI.toast(next ? 'Resumed.' : 'Paused.', 'info');
+}
+
+// Moves one row between running and paused in place, so the CSS transitions
+// have two states to travel between.
+function applyRecurringState(id, active) {
+  const row = document.querySelector(`.recurring-row[data-id="${id}"]`);
+  if (!row) return;
+  row.classList.toggle('inactive', !active);
+
+  const btn = row.querySelector('.pause-btn, .play-btn');
+  if (!btn) return;
+  btn.classList.toggle('pause-btn', active);
+  btn.classList.toggle('play-btn', !active);
+  btn.title       = active ? 'Pause' : 'Resume';
+  btn.textContent = active ? '⏸' : '▶';
+  btn.setAttribute('onclick', `toggleRecurring('${id}',${active})`);
 }
 
 async function deleteRecurring(id) {
@@ -2372,7 +2582,7 @@ function updateAmountLabels() {
     'lbl-rec-amount':       `Amount (${sym}) *`,
     'lbl-sim-income':       `Monthly Income (${sym})`,
     'lbl-compare-income':   `Monthly Income (${sym})`,
-    'lbl-balance-input':    `Update balance (${sym})`,
+    'lbl-balance-input':    `Your accounts (${sym})`,
   };
   Object.entries(map).forEach(([id, text]) => {
     const el = document.getElementById(id);

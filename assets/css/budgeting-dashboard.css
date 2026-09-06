@@ -305,7 +305,7 @@ body {
 /* ── Stats Grid ──────────────────────────────────────────── */
 .balance-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 1.15fr);
   gap: 18px 28px;
   align-items: center;
   margin-bottom: 22px;
@@ -349,21 +349,60 @@ body {
 }
 
 .balance-form {
-  min-width: 240px;
-}
-
-.balance-input-row {
-  display: flex;
-  gap: 8px;
-}
-
-.balance-input-row .input {
-  flex: 1;
   min-width: 0;
 }
 
-.balance-input-row .btn {
-  flex: none;
+.balance-form-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.balance-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* name | amount | save | remove, with the confirmed-on line spanning beneath */
+.balance-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.balance-account .input {
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+}
+
+.balance-account-amount {
+  text-align: right;
+}
+
+.balance-account-meta {
+  grid-column: 1 / -1;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-top: -2px;
+}
+
+.balance-account-meta.stale {
+  color: var(--warning);
+}
+
+.balance-account .save-btn:hover {
+  background: rgba(76, 175, 80, 0.15);
+  color: var(--success);
+}
+
+.balance-add-btn {
+  margin-top: 10px;
 }
 
 .balance-hint {
@@ -373,13 +412,21 @@ body {
   line-height: 1.45;
 }
 
-@media (max-width: 640px) {
+/* Two columns only where both have room; below that the figure sits above
+   the account list rather than being squeezed into a wrapping column. */
+@media (max-width: 900px) {
   .balance-card {
     grid-template-columns: 1fr;
   }
+}
 
-  .balance-form {
-    min-width: 0;
+@media (max-width: 560px) {
+  .balance-account {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .balance-account .balance-account-name {
+    grid-column: 1 / -1;
   }
 }
 
@@ -2499,8 +2546,57 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   border-bottom: none;
 }
 
-.recurring-row.inactive {
+/* Paused rows dim part by part rather than as a whole, so the Resume button
+   stays at full strength — it is the one control you still want to press. */
+.recurring-row .recurring-icon,
+.recurring-row .recurring-desc,
+.recurring-row .recurring-meta,
+.recurring-row .recurring-amount,
+.recurring-row .edit-btn,
+.recurring-row .del-btn {
+  opacity: 1;
+  transition: opacity 0.28s ease;
+}
+
+.recurring-row.inactive .recurring-icon,
+.recurring-row.inactive .recurring-desc,
+.recurring-row.inactive .recurring-meta,
+.recurring-row.inactive .recurring-amount,
+.recurring-row.inactive .edit-btn,
+.recurring-row.inactive .del-btn {
   opacity: 0.45;
+}
+
+.recurring-row.inactive .play-btn {
+  opacity: 1;
+}
+
+.recurring-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.recurring-status {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 100px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(255, 152, 0, 0.15);
+  color: var(--warning);
+  opacity: 0;
+  transform: scale(0.85);
+  transition: opacity 0.28s ease, transform 0.28s ease;
+}
+
+.recurring-row.inactive .recurring-status {
+  opacity: 1;
+  transform: none;
 }
 
 /* On desktop the footer is transparent — amount & actions sit as normal grid children */
@@ -2544,10 +2640,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 .recurring-meta {
-  display: block;
   font-size: 0.72rem;
   color: var(--text-dim);
-  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .recurring-amount {
@@ -2569,6 +2666,35 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+}
+
+/* Desktop: seat the controls in a padded bed that lifts as the row is hovered,
+   instead of leaving them crowded against the amount. */
+@media (min-width: 481px) {
+  .recurring-row {
+    grid-template-columns: 32px minmax(0, 1fr) auto auto;
+    gap: 14px;
+  }
+
+  .recurring-actions {
+    gap: 6px;
+    padding: 5px 7px;
+    margin-left: 2px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid transparent;
+    transition: background var(--ease), border-color var(--ease);
+  }
+
+  .recurring-row:hover .recurring-actions {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--border);
+  }
+
+  .recurring-actions .icon-btn {
+    width: 30px;
+    height: 30px;
+  }
 }
 
 /* ── Recurring row — small screens ───────────────────────── */

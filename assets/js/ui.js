@@ -82,9 +82,13 @@ const UI = (() => {
   }
 
   // ── Format Utilities ─────────────────────────────────────
+  // Whole units only — no trailing ".00" anywhere in the app. Display is
+  // rounded to the nearest unit; the stored amount keeps its full precision.
+  // The sign comes from the rounded value so we render "-$5", not "$-5".
   function currency(amount, symbol = '$') {
-    const n = parseFloat(amount) || 0;
-    return symbol + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const rounded = Math.round(parseFloat(amount) || 0);
+    const digits  = Math.abs(rounded).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    return (rounded < 0 ? '-' : '') + symbol + digits;
   }
 
   function formatDate(dateStr) {

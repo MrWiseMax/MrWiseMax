@@ -40,7 +40,7 @@
       <nav class="sidebar-nav">
         <div class="nav-section-label">Finance</div>
         <button class="nav-item active" data-nav="overview"><span class="nav-icon">📊</span> Overview</button>
-        <button class="nav-item" data-nav="vault"><span class="nav-icon">🏦</span> Budget Vault</button>
+        <button class="nav-item" data-nav="vault"><span class="nav-icon">🏦</span> Money Movements</button>
         <button class="nav-item" data-nav="plans"><span class="nav-icon">📋</span> Budget Plans</button>
         <button class="nav-item" data-nav="simulate"><span class="nav-icon">🔮</span> Simulations</button>
         <button class="nav-item" data-nav="compare"><span class="nav-icon">⚖️</span> Plan Comparison</button>
@@ -169,7 +169,7 @@
            SECTION: VAULT
       ═══════════════════════════════════════ -->
         <section class="dash-section" id="section-vault">
-          <h1 class="section-title">Budget Vault</h1>
+          <h1 class="section-title">Money Movements</h1>
           <p class="section-subtitle">Your private financial transactions and savings goals.</p>
 
           <!-- Transactions -->
@@ -554,7 +554,7 @@
                   <label class="label" style="justify-content:space-between">
                     Username
                     <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400;text-transform:none">3–30 chars
-                      · lowercase · no spaces</span>
+                      · lowercase · once every 30 days</span>
                   </label>
                   <input type="text" class="input" id="profile-username-input" placeholder="your-username"
                     maxlength="30" autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -562,8 +562,8 @@
                 <div class="form-group">
                   <label class="label" style="justify-content:space-between">
                     Display Name
-                    <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400;text-transform:none">Capitals
-                      &amp; spaces OK · max 50</span>
+                    <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400;text-transform:none">Max 50
+                      · twice every 14 days</span>
                   </label>
                   <input type="text" class="input" id="profile-nickname-input" placeholder="e.g. Alex Johnson"
                     maxlength="50">
@@ -663,7 +663,7 @@
       <span class="mobile-nav-icon">📊</span>Overview
     </button>
     <button class="mobile-nav-item" data-nav="vault">
-      <span class="mobile-nav-icon">🏦</span>Vault
+      <span class="mobile-nav-icon">🏦</span>Money
     </button>
     <button class="mobile-nav-item" data-nav="plans">
       <span class="mobile-nav-icon">📋</span>Plans

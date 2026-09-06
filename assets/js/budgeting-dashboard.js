@@ -60,19 +60,23 @@ const CURRENCIES = [
 const CurrencySettings = {
   main: CURRENCIES.find(c => c.code === 'USD'),
   viewCurrency: 'main',   // 'main' | 'USD'
-  rateToUSD: 1,
+
+  // Exchange rates keyed by base currency: { IDR: { USD: 0.000061, ... }, ... }.
+  // Loaded before the first render so every conversion below stays synchronous.
+  rates: {},
+  _missingRateWarned: false,
 
   get isUSDMode() {
     return this.main.code !== 'USD' && this.viewCurrency === 'USD';
   },
 
-  canEdit() {
-    if (this.isUSDMode) {
-      UI.toast('Go back to your main currency to make changes.', 'warning');
-      return false;
-    }
-    return true;
-  },
+  // The currency currently on screen — and the currency any amount the user
+  // types right now is understood to be in.
+  get activeCode()   { return this.isUSDMode ? 'USD' : this.main.code; },
+  get activeSymbol() { return this.isUSDMode ? '$'   : this.main.symbol; },
+
+  // Used by the currency modal's "1 XXX ~ n USD" line.
+  get rateToUSD() { return this.rates[this.main.code]?.USD ?? 1; },
 
   init() {
     try {
@@ -83,29 +87,73 @@ const CurrencySettings = {
       }
       if (saved?.view === 'USD' && this.main.code !== 'USD') this.viewCurrency = 'USD';
     } catch (_) {}
-    if (this.main.code !== 'USD') this._fetchRate(this.main.code);
   },
 
-  async _fetchRate(code) {
+  // Loads the rate table for one base currency. Returns false if unavailable.
+  async _loadRates(base) {
+    base = String(base || '').toUpperCase();
+    if (!base || this.rates[base]) return true;
+
+    const KEY = 'mrwisemax_rates_' + base;
     try {
-      const cache = JSON.parse(localStorage.getItem('mrwisemax_rate_cache') || 'null');
-      if (cache?.code === code && cache.rate && (Date.now() - cache.ts) < 3600000) {
-        this.rateToUSD = cache.rate;
-        return;
+      const cached = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (cached?.rates && (Date.now() - cached.ts) < 3600000) {
+        this.rates[base] = cached.rates;
+        return true;
       }
     } catch (_) {}
+
     try {
       // fawazahmed0 CDN — no auth, CORS-safe, updates daily
-      const res  = await fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${code.toLowerCase()}.json`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const rate = data[code.toLowerCase()]?.usd;
-      if (rate) {
-        this.rateToUSD = rate;
-        localStorage.setItem('mrwisemax_rate_cache', JSON.stringify({ code, rate, ts: Date.now() }));
-        if (App.activeSection === 'overview') renderOverview();
-      }
-    } catch (_) { this.rateToUSD = 1; }
+      const res = await fetch(`https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/${base.toLowerCase()}.json`);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const table = (await res.json())[base.toLowerCase()];
+      if (!table) throw new Error('no rate table for ' + base);
+
+      const rates = {};
+      Object.entries(table).forEach(([code, rate]) => { rates[code.toUpperCase()] = rate; });
+      this.rates[base] = rates;
+      try { localStorage.setItem(KEY, JSON.stringify({ ts: Date.now(), rates })); } catch (_) {}
+      return true;
+    } catch (e) {
+      console.warn('[Currency] Could not load rates for', base, '-', e.message);
+      return false;
+    }
+  },
+
+  // Call before rendering, and after any currency switch, so that every
+  // currency the user's data is stored in has a rate table available.
+  async ensureRates(codes) {
+    const needed = [...new Set((codes || []).filter(Boolean).map(c => String(c).toUpperCase()))];
+    const loaded = await Promise.all(needed.map(c => this._loadRates(c)));
+    return loaded.every(Boolean);
+  },
+
+  // Synchronous conversion. Identical currencies are returned untouched — this
+  // is what stops an amount entered in USD from being "converted" while the
+  // user is viewing USD.
+  convert(amount, from, to) {
+    const n = parseFloat(amount) || 0;
+    if (!n || !from || !to) return n;
+    from = String(from).toUpperCase();
+    to   = String(to).toUpperCase();
+    if (from === to) return n;
+
+    const direct = this.rates[from]?.[to];
+    if (typeof direct === 'number' && isFinite(direct)) return n * direct;
+
+    // Bridge through USD when only one leg of the pair is loaded.
+    const toUsd   = from === 'USD' ? 1 : this.rates[from]?.USD;
+    const fromUsd = to   === 'USD' ? 1 : this.rates.USD?.[to];
+    if (typeof toUsd === 'number' && typeof fromUsd === 'number') return n * toUsd * fromUsd;
+
+    // No rate at all — show the number as stored rather than invent one.
+    if (!this._missingRateWarned) {
+      this._missingRateWarned = true;
+      console.warn(`[Currency] No rate for ${from} -> ${to}; showing amounts unconverted.`);
+      UI.toast('Live exchange rates are unavailable - amounts are shown unconverted.', 'warning', 6000);
+    }
+    return n;
   },
 
   save() {
@@ -115,31 +163,47 @@ const CurrencySettings = {
     }));
   },
 
-  toUSD(amount) { return parseFloat(amount || 0) * this.rateToUSD; },
-
   _applyViewMode() { this.save(); updateCurrencyBanner(); },
 };
 
-// Patch UI.currency — apply USD conversion when in USD view mode
+// -- Money ----------------------------------------------------
+// Every saved amount carries the currency it was entered in (the `currency`
+// column). These helpers are the only way an amount should reach the screen:
+// they convert from the row's own currency into the one being viewed, and
+// leave amounts already in that currency exactly as the user typed them.
+const Money = {
+  // Saved amount -> number in the currency currently on screen.
+  toActive(amount, from) {
+    return CurrencySettings.convert(amount, from || CurrencySettings.activeCode, CurrencySettings.activeCode);
+  },
+
+  // Saved amount -> formatted string in the currency currently on screen.
+  fmt(amount, from) {
+    return UI.currency(this.toActive(amount, from));
+  },
+
+  // Amount the user just typed -> the currency a given row is stored in.
+  fromActive(amount, to) {
+    return CurrencySettings.convert(amount, CurrencySettings.activeCode, to || CurrencySettings.activeCode);
+  },
+
+  // Every currency present in the user's saved data, plus both display currencies.
+  usedCodes() {
+    const codes = [CurrencySettings.main.code, 'USD'];
+    [App.transactions, App.recurring, App.goals, App.plans].forEach(list =>
+      (list || []).forEach(row => { if (row.currency) codes.push(row.currency); }));
+    return codes;
+  },
+};
+
+// Patch UI.currency — always renders in the currency being viewed.
+// Conversion happens in Money.toActive(), never here, so no amount can ever
+// be converted twice.
 (function () {
   const _orig = UI.currency;
   UI.currency = function (amount, forceSymbol) {
     if (forceSymbol !== undefined) return _orig(amount, forceSymbol);
-    if (CurrencySettings.isUSDMode) return _orig(parseFloat(amount || 0) * CurrencySettings.rateToUSD, '$');
-    return _orig(amount, CurrencySettings.main.symbol);
-  };
-})();
-
-// Block edit-type modals when in USD view mode
-(function () {
-  const _origOpen = UI.openModal;
-  const EDIT_MODALS = new Set([
-    'transaction-modal', 'goal-modal', 'contribute-modal',
-    'plan-modal', 'recurring-modal', 'share-blueprint-modal',
-  ]);
-  UI.openModal = function (id) {
-    if (EDIT_MODALS.has(id) && !CurrencySettings.canEdit()) return;
-    _origOpen(id);
+    return _orig(amount, CurrencySettings.activeSymbol);
   };
 })();
 
@@ -201,6 +265,12 @@ async function initDashboard() {
   renderUserInfo();
 
   await Promise.all([loadProfile(), loadCategories(), loadTransactions(), loadPlans(), loadGoals(), loadRecurring()]);
+
+  // Rates must be in place before anything renders: every amount is converted
+  // from the currency it was saved in into the one being displayed.
+  await CurrencySettings.ensureRates(Money.usedCodes());
+  await backfillCurrencies();
+
   renderUserInfo(); // Re-render with full profile data (nickname + custom avatar)
   processRecurringTransactions(); // auto-post any pending monthly entries
 
@@ -352,6 +422,28 @@ function _applyLayout() {
   }
 }
 
+// ── Legacy currency backfill ──────────────────────────────────
+// Rows saved before amounts carried a currency were entered in whatever the
+// user's main currency is — something only the browser knows, so the tagging
+// happens here rather than in SQL. Runs once; afterwards there is nothing to do.
+async function backfillCurrencies() {
+  const code    = CurrencySettings.main.code;
+  const targets = [
+    ['transactions',           App.transactions, loadTransactions],
+    ['recurring_transactions', App.recurring,    loadRecurring],
+    ['savings_goals',          App.goals,        loadGoals],
+    ['budget_plans',           App.plans,        loadPlans],
+  ].filter(([, rows]) => (rows || []).some(r => !r.currency));
+
+  if (!targets.length) return;
+
+  console.log(`[Currency] Tagging legacy rows in ${targets.length} table(s) as ${code}.`);
+  await Promise.all(targets.map(([table]) =>
+    db.from(table).update({ currency: code }).eq('user_id', App.user.id).is('currency', null)
+  ));
+  await Promise.all(targets.map(([, , reload]) => reload()));
+}
+
 // ── Data Loaders ─────────────────────────────────────────────
 async function loadProfile()      { const { data } = await db.from('profiles').select('*').eq('id', App.user.id).single(); if (data) App.profile = data; }
 async function loadRecurring()    { const { data } = await db.from('recurring_transactions').select('*').eq('user_id', App.user.id).order('created_at'); if (data) App.recurring = data; }
@@ -384,8 +476,8 @@ function renderOverview() {
     return d.getMonth() === month && d.getFullYear() === year;
   });
 
-  const income   = thisMonth.filter(t => t.type === 'income').reduce((s, t) => s + +t.amount, 0);
-  const expenses = thisMonth.filter(t => t.type === 'expense').reduce((s, t) => s + +t.amount, 0);
+  const income   = thisMonth.filter(t => t.type === 'income').reduce((s, t) => s + Money.toActive(t.amount, t.currency), 0);
+  const expenses = thisMonth.filter(t => t.type === 'expense').reduce((s, t) => s + Money.toActive(t.amount, t.currency), 0);
   const savings  = income - expenses;
   const burnRate = income > 0 ? ((expenses / income) * 100).toFixed(1) : 0;
   const score    = calcHealthScore();
@@ -395,11 +487,13 @@ function renderOverview() {
   setText('stat-savings',  UI.currency(savings));
   setText('stat-burn',     burnRate + '%');
 
-  // USD sub-values (shown only in main view when currency ≠ USD and rate is loaded)
-  const _showSub = !CurrencySettings.isUSDMode && CurrencySettings.main.code !== 'USD' && CurrencySettings.rateToUSD !== 1;
+  // Secondary "≈ $… USD" line, shown whenever the user isn't already viewing USD.
+  const _showSub = CurrencySettings.activeCode !== 'USD';
   [['stat-income-sub', income], ['stat-expenses-sub', expenses], ['stat-savings-sub', savings]].forEach(([id, amt]) => {
     const el = document.getElementById(id);
-    if (el) el.textContent = _showSub ? `≈ ${UI.currency(CurrencySettings.toUSD(amt), '$')} USD` : '';
+    if (el) el.textContent = _showSub
+      ? `≈ ${UI.currency(CurrencySettings.convert(amt, CurrencySettings.activeCode, 'USD'), '$')} USD`
+      : '';
   });
 
   renderHealthScore(score);
@@ -489,8 +583,8 @@ function calcHealthScore() {
   const month = now.getMonth();
   const year  = now.getFullYear();
   const tx    = App.transactions.filter(t => { const d = new Date(t.date); return d.getMonth() === month && d.getFullYear() === year; });
-  const income   = tx.filter(t => t.type === 'income').reduce((s, t) => s + +t.amount, 0);
-  const expenses = tx.filter(t => t.type === 'expense').reduce((s, t) => s + +t.amount, 0);
+  const income   = tx.filter(t => t.type === 'income').reduce((s, t) => s + Money.toActive(t.amount, t.currency), 0);
+  const expenses = tx.filter(t => t.type === 'expense').reduce((s, t) => s + Money.toActive(t.amount, t.currency), 0);
   if (!income) return 0;
 
   const savingsRate  = ((income - expenses) / income) * 100;
@@ -570,7 +664,7 @@ function renderExpensePieChart(transactions) {
 
   const expenses = transactions.filter(t => t.type === 'expense');
   const byCat = {};
-  expenses.forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + +t.amount; });
+  expenses.forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + Money.toActive(t.amount, t.currency); });
 
   if (App.charts.pie) { App.charts.pie.destroy(); App.charts.pie = null; }
 
@@ -610,8 +704,8 @@ function renderTrendChart() {
     const m = d.getMonth(), y = d.getFullYear();
     months.push(UI.monthName(m));
     const mTx = App.transactions.filter(t => { const td = new Date(t.date); return td.getMonth() === m && td.getFullYear() === y; });
-    incomeData.push(mTx.filter(t => t.type === 'income').reduce((s, t) => s + +t.amount, 0));
-    expenseData.push(mTx.filter(t => t.type === 'expense').reduce((s, t) => s + +t.amount, 0));
+    incomeData.push(mTx.filter(t => t.type === 'income').reduce((s, t) => s + Money.toActive(t.amount, t.currency), 0));
+    expenseData.push(mTx.filter(t => t.type === 'expense').reduce((s, t) => s + Money.toActive(t.amount, t.currency), 0));
   }
 
   App.charts.trend = new Chart(canvas, {
@@ -628,7 +722,7 @@ function renderTrendChart() {
       plugins: { legend: { labels: { color: '#ccc', font: { size: 12 } } } },
       scales: {
         x: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#888', callback: v => { const sym = CurrencySettings.isUSDMode ? '$' : CurrencySettings.main.symbol; return sym + v.toLocaleString(); } }, grid: { color: 'rgba(255,255,255,0.04)' } }
+        y: { ticks: { color: '#888', callback: v => UI.currency(v) }, grid: { color: 'rgba(255,255,255,0.04)' } }
       }
     }
   });
@@ -650,7 +744,7 @@ function renderRecentTransactions() {
         <span class="tx-desc">${t.description || t.category}</span>
         <span class="tx-cat">${t.category} · ${UI.formatDate(t.date)}</span>
       </div>
-      <span class="tx-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${UI.currency(t.amount)}</span>
+      <span class="tx-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${Money.fmt(t.amount, t.currency)}</span>
     </div>`).join('');
 }
 
@@ -667,7 +761,7 @@ function renderGoalsOverview() {
     return `<div class="goal-item">
       <div class="goal-header"><span class="goal-name">${g.name}</span><span class="goal-pct">${pct}%</span></div>
       <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${pct}%;background:${g.color || '#BB885F'}"></div></div>
-      <div class="goal-amounts"><span>${UI.currency(g.current_amount)}</span><span>of ${UI.currency(g.target_amount)}</span></div>
+      <div class="goal-amounts"><span>${Money.fmt(g.current_amount, g.currency)}</span><span>of ${Money.fmt(g.target_amount, g.currency)}</span></div>
     </div>`;
   }).join('');
 }
@@ -708,7 +802,7 @@ function renderTransactionTable() {
         <span class="tx-desc">${t.description || '—'}</span>
         <span class="tx-badge">${t.category}</span>
       </div>
-      <div class="tx-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${UI.currency(t.amount)}</div>
+      <div class="tx-amount ${t.type}">${t.type === 'income' ? '+' : '-'}${Money.fmt(t.amount, t.currency)}</div>
       <div class="tx-actions">
         <button class="icon-btn edit-btn" onclick="openEditTransaction('${t.id}')" title="Edit">✎</button>
         <button class="icon-btn del-btn"  onclick="deleteTransaction('${t.id}')"   title="Delete">✕</button>
@@ -768,7 +862,7 @@ function openEditTransaction(id) {
   App.editing.transaction = tx;
   document.getElementById('tx-modal-title').textContent = 'Edit Transaction';
   document.getElementById('tx-type').value        = tx.type;
-  document.getElementById('tx-amount').value      = Fmt.set(tx.amount);
+  document.getElementById('tx-amount').value      = Fmt.set(Money.toActive(tx.amount, tx.currency));
   document.getElementById('tx-description').value = tx.description || '';
   document.getElementById('tx-date').value        = UI.formatDateInput(tx.date);
   populateTxCategoryDropdown(tx.category);
@@ -855,7 +949,8 @@ async function saveTransaction() {
   const btn = document.getElementById('tx-save-btn');
   UI.setLoading(btn, true);
 
-  const payload = { user_id: App.user.id, type, amount, category, description, date };
+  // Recorded in the currency the user is looking at as they type it.
+  const payload = { user_id: App.user.id, type, amount, category, description, date, currency: CurrencySettings.activeCode };
   let error;
   if (App.editing.transaction) {
     ({ error } = await db.from('transactions').update(payload).eq('id', App.editing.transaction.id).eq('user_id', App.user.id));
@@ -874,7 +969,6 @@ async function saveTransaction() {
 }
 
 async function deleteTransaction(id) {
-  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Delete this transaction? This cannot be undone.', async () => {
     const { error } = await db.from('transactions').delete().eq('id', id).eq('user_id', App.user.id);
     if (error) { UI.toast(error.message, 'error'); return; }
@@ -906,9 +1000,9 @@ function renderGoalsList() {
       </div>
       <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${pct}%;background:${g.color || '#BB885F'}"></div></div>
       <div class="goal-amounts">
-        <span class="goal-current">${UI.currency(g.current_amount)}</span>
+        <span class="goal-current">${Money.fmt(g.current_amount, g.currency)}</span>
         <span class="goal-pct">${pct}%</span>
-        <span class="goal-target">of ${UI.currency(g.target_amount)}</span>
+        <span class="goal-target">of ${Money.fmt(g.target_amount, g.currency)}</span>
       </div>
       ${g.deadline ? `<div class="goal-deadline">🗓 Target: ${UI.formatDate(g.deadline)}</div>` : ''}
       <button class="btn btn-sm btn-outline" style="margin-top:10px" onclick="openContributeGoal('${g.id}')">+ Add Contribution</button>
@@ -930,8 +1024,8 @@ function openEditGoal(id) {
   App.editing.goal = g;
   document.getElementById('goal-modal-title').textContent = 'Edit Goal';
   document.getElementById('goal-name').value    = g.name;
-  document.getElementById('goal-target').value  = Fmt.set(g.target_amount);
-  document.getElementById('goal-current').value = Fmt.set(g.current_amount);
+  document.getElementById('goal-target').value  = Fmt.set(Money.toActive(g.target_amount, g.currency));
+  document.getElementById('goal-current').value = Fmt.set(Money.toActive(g.current_amount, g.currency));
   document.getElementById('goal-deadline').value = g.deadline || '';
   document.getElementById('goal-color').value   = g.color || '#BB885F';
   UI.openModal('goal-modal');
@@ -949,7 +1043,10 @@ async function contributeToGoal() {
   const amount = Fmt.get(document.getElementById('contribute-amount').value);
   if (!amount || amount <= 0) { UI.toast('Enter a valid amount.', 'error'); return; }
   const g = App.editing.goal;
-  const newAmount = Math.min(+g.current_amount + amount, +g.target_amount);
+  // The contribution is typed in the currency on screen; the goal is stored in
+  // its own currency, so bring the contribution across before adding it.
+  const contribution = Money.fromActive(amount, g.currency);
+  const newAmount = Math.min(+g.current_amount + contribution, +g.target_amount);
   const { error } = await db.from('savings_goals').update({ current_amount: newAmount, updated_at: new Date().toISOString() }).eq('id', g.id).eq('user_id', App.user.id);
   if (error) { UI.toast(error.message, 'error'); return; }
   if (newAmount >= +g.target_amount) UI.toast(`🎉 Goal "${g.name}" reached!`, 'success');
@@ -968,7 +1065,7 @@ async function saveGoal() {
   const color        = document.getElementById('goal-color').value || '#BB885F';
   if (!name || !target) { UI.toast('Goal name and target amount are required.', 'error'); return; }
 
-  const payload = { user_id: App.user.id, name, target_amount: target, current_amount: current, deadline, color, updated_at: new Date().toISOString() };
+  const payload = { user_id: App.user.id, name, target_amount: target, current_amount: current, deadline, color, currency: CurrencySettings.activeCode, updated_at: new Date().toISOString() };
   let error;
   if (App.editing.goal) {
     ({ error } = await db.from('savings_goals').update(payload).eq('id', App.editing.goal.id).eq('user_id', App.user.id));
@@ -984,7 +1081,6 @@ async function saveGoal() {
 }
 
 async function deleteGoal(id) {
-  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Delete this savings goal?', async () => {
     const { error } = await db.from('savings_goals').delete().eq('id', id).eq('user_id', App.user.id);
     if (error) { UI.toast(error.message, 'error'); return; }
@@ -1070,6 +1166,7 @@ async function importTemplate(templateId) {
     description: t.description,
     allocations,
     monthly_income: 0,
+    currency: CurrencySettings.activeCode,
     status: 'active',
   }]);
 
@@ -1096,7 +1193,7 @@ function project6Months(allocations, income) {
 
 function planCard(p, archived = false) {
   // Always use live recurring income; fall back to stored value for legacy plans
-  const income  = getRecurringMonthlyIncome() || p.monthly_income || 0;
+  const income  = getRecurringMonthlyIncome() || Money.toActive(p.monthly_income, p.currency) || 0;
   const allocs  = Object.entries(p.allocations || {});
   const total   = allocs.reduce((s, [, v]) => s + (+v.percentage || 0), 0);
   const unalloc = Math.max(0, 100 - total);
@@ -1141,7 +1238,7 @@ function planCard(p, archived = false) {
 
     ${income > 0
       ? `<div class="plan-income">Monthly income basis: <strong>${UI.currency(income)}/mo</strong></div>`
-      : `<div class="plan-income" style="color:var(--warning)">⚠ No recurring income — add one in Budget Vault</div>`}
+      : `<div class="plan-income" style="color:var(--warning)">⚠ No recurring income — add one in Money Movements</div>`}
 
     <div class="plan-allocations">
       ${allocs.map(([name, v]) => `
@@ -1186,7 +1283,7 @@ function planCard(p, archived = false) {
 function getRecurringMonthlyIncome() {
   return App.recurring
     .filter(r => r.type === 'income' && r.is_active)
-    .reduce((sum, r) => sum + parseFloat(r.amount || 0), 0);
+    .reduce((sum, r) => sum + Money.toActive(r.amount, r.currency), 0);
 }
 
 // Updates the income info banner inside the plan modal
@@ -1198,7 +1295,7 @@ function updatePlanModalIncomeInfo() {
     el.innerHTML = `💰 Plan is based on your recurring monthly income: <strong>${UI.currency(income)}/mo</strong>`;
     el.className = 'plan-modal-income-info has-income';
   } else {
-    el.innerHTML = `⚠ No active recurring income found. <span style="color:var(--primary);cursor:pointer;text-decoration:underline" onclick="UI.closeModal('plan-modal');navigateTo('vault')">Add one in Budget Vault</span> before creating a plan.`;
+    el.innerHTML = `⚠ No active recurring income found. <span style="color:var(--primary);cursor:pointer;text-decoration:underline" onclick="UI.closeModal('plan-modal');navigateTo('vault')">Add one in Money Movements</span> before creating a plan.`;
     el.className = 'plan-modal-income-info no-income';
   }
 }
@@ -1221,7 +1318,7 @@ function updateAllocTotal() {
 function openAddPlan() {
   const income = getRecurringMonthlyIncome();
   if (income === 0) {
-    UI.toast('Add at least one active recurring income entry in Budget Vault before creating a plan.', 'warning');
+    UI.toast('Add at least one active recurring income entry in Money Movements before creating a plan.', 'warning');
     return;
   }
   App.editing.plan = null;
@@ -1236,7 +1333,7 @@ function openAddPlan() {
 function openEditPlan(id) {
   const income = getRecurringMonthlyIncome();
   if (income === 0) {
-    UI.toast('Add at least one active recurring income entry in Budget Vault before editing a plan.', 'warning');
+    UI.toast('Add at least one active recurring income entry in Money Movements before editing a plan.', 'warning');
     return;
   }
   const p = App.plans.find(p => p.id === id);
@@ -1310,7 +1407,7 @@ async function savePlan() {
   if (totalPct > 100) { UI.toast('Total allocation exceeds 100%. Please reduce some percentages.', 'error'); return; }
 
   const monthly_income = getRecurringMonthlyIncome();
-  const payload = { user_id: App.user.id, name, description, allocations, monthly_income, updated_at: new Date().toISOString() };
+  const payload = { user_id: App.user.id, name, description, allocations, monthly_income, currency: CurrencySettings.activeCode, updated_at: new Date().toISOString() };
   let error;
   if (App.editing.plan) {
     ({ error } = await db.from('budget_plans').update(payload).eq('id', App.editing.plan.id).eq('user_id', App.user.id));
@@ -1325,30 +1422,26 @@ async function savePlan() {
 }
 
 async function duplicatePlan(id) {
-  if (!CurrencySettings.canEdit()) return;
   const p = App.plans.find(p => p.id === id);
   if (!p) return;
   const { error } = await db.from('budget_plans').insert([{
     user_id: App.user.id, name: p.name + ' (copy)',
     description: p.description, allocations: p.allocations,
-    monthly_income: p.monthly_income, status: 'draft'
+    monthly_income: p.monthly_income, currency: p.currency, status: 'draft'
   }]);
   if (error) { UI.toast(error.message, 'error'); return; }
   UI.toast('Plan duplicated!', 'success');
   await loadPlans(); renderPlans();
 }
 async function archivePlan(id) {
-  if (!CurrencySettings.canEdit()) return;
   await db.from('budget_plans').update({ status: 'archived' }).eq('id', id).eq('user_id', App.user.id);
   await loadPlans(); renderPlans(); UI.toast('Plan archived.', 'info');
 }
 async function unarchivePlan(id) {
-  if (!CurrencySettings.canEdit()) return;
   await db.from('budget_plans').update({ status: 'active' }).eq('id', id).eq('user_id', App.user.id);
   await loadPlans(); renderPlans(); UI.toast('Plan restored.', 'success');
 }
 async function deletePlan(id) {
-  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Delete this budget plan?', async () => {
     await db.from('budget_plans').delete().eq('id', id).eq('user_id', App.user.id);
     UI.toast('Plan deleted.', 'success');
@@ -1419,7 +1512,7 @@ function runSimulation() {
       plugins: { legend: { labels: { color: '#ccc', font: { size: 12 } } } },
       scales: {
         x: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.04)' } },
-        y: { ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: 'rgba(255,255,255,0.04)' } }
+        y: { ticks: { color: '#888', callback: v => UI.currency(v) }, grid: { color: 'rgba(255,255,255,0.04)' } }
       }
     }
   });
@@ -1446,7 +1539,10 @@ function comparePlans() {
   const p2 = App.plans.find(p => p.id === id2);
   if (!p1 || !p2) return;
 
-  const income = Fmt.get(document.getElementById('compare-income')?.value) || p1.monthly_income || p2.monthly_income || 3000;
+  const income = Fmt.get(document.getElementById('compare-income')?.value)
+    || Money.toActive(p1.monthly_income, p1.currency)
+    || Money.toActive(p2.monthly_income, p2.currency)
+    || 3000;
   const years  = parseInt(document.getElementById('compare-years')?.value) || 5;
 
   const proj1 = projectPlanWealth(p1.allocations, income, years);
@@ -1506,7 +1602,7 @@ function comparePlans() {
         plugins: { legend: { labels: { color: '#ccc' } } },
         scales: {
           x: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.04)' } },
-          y: { ticks: { color: '#888', callback: v => '$' + v.toLocaleString() }, grid: { color: 'rgba(255,255,255,0.04)' } }
+          y: { ticks: { color: '#888', callback: v => UI.currency(v) }, grid: { color: 'rgba(255,255,255,0.04)' } }
         }
       }
     });
@@ -1606,9 +1702,7 @@ function renderCommunityFeed() {
 }
 
 function blueprintCard(b) {
-  const liked = App.likedBlueprintIds.has(b.id);
-  const saved = App.savedBlueprintIds.has(b.id);
-  const user  = b.profiles?.username || 'Anonymous';
+  const user = b.profiles?.username || 'Anonymous';
   return `<div class="blueprint-card" data-id="${b.id}">
     <div class="bp-card-header">
       <div class="bp-author">
@@ -1628,12 +1722,28 @@ function blueprintCard(b) {
         </div>`).join('')}
     </div>
     ${b.tags?.length ? `<div class="bp-tags">${b.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>` : ''}
-    <div class="bp-card-footer">
-      <button class="bp-action-btn ${liked ? 'liked' : ''}" onclick="toggleLike('${b.id}')">♥ <span id="lc-${b.id}">${b.likes_count || 0}</span></button>
-      <button class="bp-action-btn" onclick="openBlueprintDetail('${b.id}')">💬 ${b.comments_count || 0}</button>
-      <button class="bp-action-btn ${saved ? 'saved' : ''}" onclick="toggleSave('${b.id}')">${saved ? '🔖 Saved' : '+ Save'}</button>
-    </div>
+    <div class="bp-card-footer">${bpCardFooter(b)}</div>
   </div>`;
+}
+
+// The like / comment / save row, split out so it can be repainted on its own
+// after a like or save without rebuilding — or reloading — the whole feed.
+function bpCardFooter(b) {
+  const liked = App.likedBlueprintIds.has(b.id);
+  const saved = App.savedBlueprintIds.has(b.id);
+  return `
+      <button class="bp-action-btn ${liked ? 'liked' : ''}" onclick="toggleLike('${b.id}')">♥ <span class="bp-like-count">${b.likes_count || 0}</span></button>
+      <button class="bp-action-btn" onclick="openBlueprintDetail('${b.id}')">💬 ${b.comments_count || 0}</button>
+      <button class="bp-action-btn ${saved ? 'saved' : ''}" onclick="toggleSave('${b.id}')">${saved ? '🔖 Saved' : '+ Save'}</button>`;
+}
+
+// Repaints a blueprint's footer everywhere it is on screen — the community
+// feed, the Saved grid and the Profile grid can all be showing the same card.
+function refreshBlueprintCards(id) {
+  const b = App.blueprints.find(x => x.id === id);
+  if (!b) return;
+  document.querySelectorAll(`.blueprint-card[data-id="${id}"] .bp-card-footer`)
+    .forEach(el => { el.innerHTML = bpCardFooter(b); });
 }
 
 function bpColor(key) {
@@ -1644,34 +1754,49 @@ function bpColor(key) {
   return '#BB885F';
 }
 
+// Both toggles repaint immediately and undo themselves if the write fails,
+// so the button always reflects what is actually stored.
 async function toggleLike(id) {
   const liked = App.likedBlueprintIds.has(id);
-  if (liked) {
-    await db.from('blueprint_likes').delete().eq('blueprint_id', id).eq('user_id', App.user.id);
-    App.likedBlueprintIds.delete(id);
-  } else {
-    await db.from('blueprint_likes').insert([{ blueprint_id: id, user_id: App.user.id }]);
-    App.likedBlueprintIds.add(id);
+  const bp    = App.blueprints.find(b => b.id === id);
+
+  if (liked) App.likedBlueprintIds.delete(id); else App.likedBlueprintIds.add(id);
+  if (bp) bp.likes_count = Math.max(0, (bp.likes_count || 0) + (liked ? -1 : 1));
+  refreshBlueprintCards(id);
+
+  const { error } = liked
+    ? await db.from('blueprint_likes').delete().eq('blueprint_id', id).eq('user_id', App.user.id)
+    : await db.from('blueprint_likes').insert([{ blueprint_id: id, user_id: App.user.id }]);
+
+  if (error) {
+    if (liked) App.likedBlueprintIds.add(id); else App.likedBlueprintIds.delete(id);
+    if (bp) bp.likes_count = Math.max(0, (bp.likes_count || 0) + (liked ? 1 : -1));
+    refreshBlueprintCards(id);
+    UI.toast('Could not update your like.', 'error');
   }
-  const bp = App.blueprints.find(b => b.id === id);
-  if (bp) { bp.likes_count = Math.max(0, (bp.likes_count || 0) + (liked ? -1 : 1)); }
-  const cnt = document.getElementById(`lc-${id}`);
-  if (cnt) cnt.textContent = bp?.likes_count || 0;
-  const card = document.querySelector(`.blueprint-card[data-id="${id}"] .bp-action-btn`);
-  if (card) card.classList.toggle('liked', !liked);
 }
 
 async function toggleSave(id) {
   const saved = App.savedBlueprintIds.has(id);
-  if (saved) {
-    await db.from('saved_blueprints').delete().eq('blueprint_id', id).eq('user_id', App.user.id);
-    App.savedBlueprintIds.delete(id);
-    UI.toast('Removed from saved.', 'info');
-  } else {
-    await db.from('saved_blueprints').insert([{ blueprint_id: id, user_id: App.user.id }]);
-    App.savedBlueprintIds.add(id);
-    UI.toast('Blueprint saved!', 'success');
+
+  if (saved) App.savedBlueprintIds.delete(id); else App.savedBlueprintIds.add(id);
+  refreshBlueprintCards(id);
+
+  const { error } = saved
+    ? await db.from('saved_blueprints').delete().eq('blueprint_id', id).eq('user_id', App.user.id)
+    : await db.from('saved_blueprints').insert([{ blueprint_id: id, user_id: App.user.id }]);
+
+  if (error) {
+    if (saved) App.savedBlueprintIds.add(id); else App.savedBlueprintIds.delete(id);
+    refreshBlueprintCards(id);
+    UI.toast('Could not update your saved blueprints.', 'error');
+    return;
   }
+
+  UI.toast(saved ? 'Removed from saved.' : 'Blueprint saved!', saved ? 'info' : 'success');
+
+  // The Saved section is a filtered list, so it has to be rebuilt rather than repainted.
+  if (App.activeSection === 'saved') loadAndRenderSaved();
 }
 
 async function openBlueprintDetail(id) {
@@ -1852,15 +1977,17 @@ async function saveProfile() {
   const usernameOk = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(username) && username.length >= 3 && !username.includes('--');
   if (!usernameOk) { UI.toast('Invalid username format. Use 3–30 lowercase letters, numbers, or hyphens.', 'error'); return; }
 
-  // Check availability + 14-day change limit (skip both if username unchanged)
+  const DAY = 24 * 60 * 60 * 1000;
+
+  // Username: once every 30 days. The database trigger enforces this as well —
+  // these checks exist to fail fast with a clear message before any request.
   if (username !== App.profile?.username) {
-    // 14-day cooldown
     const lastChanged = App.profile?.username_changed_at;
     if (lastChanged) {
-      const daysSince = (Date.now() - new Date(lastChanged).getTime()) / (1000 * 60 * 60 * 24);
-      if (daysSince < 14) {
-        const daysLeft = Math.ceil(14 - daysSince);
-        UI.toast(`Username can only be changed once every 14 days. Try again in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}.`, 'error');
+      const daysSince = (Date.now() - new Date(lastChanged).getTime()) / DAY;
+      if (daysSince < 30) {
+        const daysLeft = Math.ceil(30 - daysSince);
+        UI.toast(`Username can only be changed once every 30 days. Try again in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}.`, 'error');
         return;
       }
     }
@@ -1868,9 +1995,23 @@ async function saveProfile() {
     if (!available) { UI.toast('That username is already taken.', 'error'); return; }
   }
 
-  const updates = { username, bio, updated_at: new Date().toISOString() };
-  if (username !== App.profile?.username) updates.username_changed_at = new Date().toISOString();
-  if (nickname !== undefined) updates.nickname = nickname || null;
+  // Display name: twice every 14 days, counted over a rolling window.
+  const newNickname = nickname || null;
+  if (newNickname !== (App.profile?.nickname ?? null)) {
+    const recent = (App.profile?.nickname_changed_at || [])
+      .map(ts => new Date(ts).getTime())
+      .filter(ts => Date.now() - ts < 14 * DAY)
+      .sort((a, b) => a - b);
+    if (recent.length >= 2) {
+      const daysLeft = Math.max(1, Math.ceil((recent[0] + 14 * DAY - Date.now()) / DAY));
+      UI.toast(`Display name can only be changed twice every 14 days. Try again in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}.`, 'error');
+      return;
+    }
+  }
+
+  // username_changed_at and nickname_changed_at are maintained by the database
+  // trigger; anything sent from here would just be overwritten.
+  const updates = { username, bio, nickname: newNickname, updated_at: new Date().toISOString() };
 
   const { error } = await db.from('profiles').update(updates).eq('id', App.user.id);
   if (error) { UI.toast(error.message, 'error'); return; }
@@ -1907,6 +2048,9 @@ async function processRecurringTransactions() {
       category:    r.category,
       description: r.description || r.category,
       amount:      r.amount,
+      // Posted in the currency the recurring entry was created in, not the
+      // one the user happens to be viewing when it fires.
+      currency:    r.currency || CurrencySettings.main.code,
       date:        dateStr,
     }]);
 
@@ -1939,7 +2083,7 @@ function renderRecurringList() {
         <span class="recurring-meta">${r.category} · Day ${r.day_of_month} of each month</span>
       </div>
       <div class="recurring-footer">
-        <span class="recurring-amount ${r.type}">${r.type === 'income' ? '+' : '-'}${UI.currency(r.amount)}</span>
+        <span class="recurring-amount ${r.type}">${r.type === 'income' ? '+' : '-'}${Money.fmt(r.amount, r.currency)}</span>
         <div class="recurring-actions">
           <button class="icon-btn edit-btn" onclick="openEditRecurring('${r.id}')" title="Edit">✎</button>
           <button class="icon-btn ${r.is_active ? 'pause-btn' : 'play-btn'}" onclick="toggleRecurring('${r.id}',${r.is_active})" title="${r.is_active ? 'Pause' : 'Resume'}">${r.is_active ? '⏸' : '▶'}</button>
@@ -1971,7 +2115,7 @@ function openEditRecurring(id) {
   App.editing.recurring = r;
   document.getElementById('rec-modal-title').textContent = 'Edit Recurring Entry';
   document.getElementById('rec-type').value        = r.type;
-  document.getElementById('rec-amount').value      = Fmt.set(r.amount);
+  document.getElementById('rec-amount').value      = Fmt.set(Money.toActive(r.amount, r.currency));
   document.getElementById('rec-description').value = r.description || '';
   document.getElementById('rec-day').value         = r.day_of_month;
   populateRecurringCategoryDropdown(r.type, r.category);
@@ -1999,7 +2143,7 @@ async function saveRecurring() {
   if (!type || !amount || !category) { UI.toast('Type, amount and category are required.', 'error'); return; }
   if (isNaN(amount) || amount <= 0)  { UI.toast('Amount must be a positive number.', 'error'); return; }
 
-  const payload = { user_id: App.user.id, type, amount, category, description, day_of_month: day };
+  const payload = { user_id: App.user.id, type, amount, category, description, day_of_month: day, currency: CurrencySettings.activeCode };
   let error;
   if (App.editing.recurring) {
     ({ error } = await db.from('recurring_transactions').update(payload).eq('id', App.editing.recurring.id).eq('user_id', App.user.id));
@@ -2014,14 +2158,12 @@ async function saveRecurring() {
 }
 
 async function toggleRecurring(id, isActive) {
-  if (!CurrencySettings.canEdit()) return;
   await db.from('recurring_transactions').update({ is_active: !isActive }).eq('id', id).eq('user_id', App.user.id);
   await loadRecurring(); renderRecurringList();
   UI.toast(isActive ? 'Paused.' : 'Resumed.', 'info');
 }
 
 async function deleteRecurring(id) {
-  if (!CurrencySettings.canEdit()) return;
   UI.confirm('Remove this recurring entry? Future months will no longer be posted.', async () => {
     await db.from('recurring_transactions').delete().eq('id', id).eq('user_id', App.user.id);
     await loadRecurring(); renderRecurringList();
@@ -2094,7 +2236,7 @@ function updateCurrencyBanner() {
 }
 
 function updateAmountLabels() {
-  const sym = CurrencySettings.isUSDMode ? '$' : CurrencySettings.main.symbol;
+  const sym = CurrencySettings.activeSymbol;
   const map = {
     'lbl-tx-amount':        `Amount (${sym}) *`,
     'lbl-goal-target':      `Target Amount (${sym}) *`,
@@ -2150,7 +2292,7 @@ function renderCurrencyStatusRow() {
       <div class="cur-status-flag">${usd.flag}</div>
       <div class="cur-status-name">${usd.name}</div>
       <div class="cur-status-code">${usd.code} <span class="cur-status-sym">${usd.symbol}</span></div>
-      <div class="cur-status-usd">${isUSDMode ? 'Active · Read-only' : 'Click to preview'}</div>
+      <div class="cur-status-usd">${isUSDMode ? 'Active' : 'Click to view'}</div>
     </div>` : '';
 
   el.innerHTML = mainCard + usdCard;
@@ -2203,14 +2345,14 @@ function selectCurrency(code) {
   // Case 1: switching INTO USD view mode (main ≠ USD, clicking USD)
   if (code === 'USD' && main.code !== 'USD') {
     UI.confirm(
-      `Switch to USD view? Amounts will be shown converted at today's rate. Editing will be disabled until you switch back.`,
+      `Switch to USD? Everything is converted at today's rate, except amounts you already entered in USD — those stay exactly as you typed them. Anything you add while viewing USD is saved as USD.`,
       async () => {
         UI.closeModal('currency-modal');
-        await CurrencySettings._fetchRate(main.code);
+        await CurrencySettings.ensureRates(Money.usedCodes());
         CurrencySettings.viewCurrency = 'USD';
         CurrencySettings._applyViewMode();
         navigateTo(App.activeSection);
-        UI.toast('USD view enabled. Editing is disabled.', 'info');
+        UI.toast('Now showing US Dollar (USD).', 'info');
       },
       false
     );
@@ -2229,17 +2371,12 @@ function selectCurrency(code) {
 
   // Case 3: changing the main currency
   UI.confirm(
-    `Set ${found.name} (${found.code}) as your main currency? All amounts will be shown in ${found.symbol}.`,
+    `Set ${found.name} (${found.code}) as your main currency? Everything you've saved is converted at today's rate — amounts already entered in ${found.code} stay exactly as they are.`,
     async () => {
       UI.closeModal('currency-modal');
       CurrencySettings.main = found;
       CurrencySettings.viewCurrency = 'main';
-      if (found.code !== 'USD') {
-        await CurrencySettings._fetchRate(found.code);
-      } else {
-        CurrencySettings.rateToUSD = 1;
-        localStorage.removeItem('mrwisemax_rate_cache');
-      }
+      await CurrencySettings.ensureRates(Money.usedCodes());
       CurrencySettings.save();
       updateCurrencyBanner();
       navigateTo(App.activeSection);

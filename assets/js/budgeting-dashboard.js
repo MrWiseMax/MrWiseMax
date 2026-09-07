@@ -11,14 +11,10 @@ const App = {
   expenseGroups: [],
   // Read only, to offer a one-time import of the previous version's entries.
   recurring: [],
-  blueprints: [],
-  savedBlueprintIds: new Set(),
-  likedBlueprintIds: new Set(),
   activeSection: 'overview',
   coverageWindow: 30,
   expenseFilters: { search: '', sort: 'due' },
   editing: { expense: null, group: null },
-  communitySearch: '',
 };
 
 // ── Currency Configuration ────────────────────────────────────
@@ -289,8 +285,6 @@ async function initDashboard() {
   setupNavigation();
   setupExpenseControls();
   setupDynamicLayout();
-  subscribeToBlueprints();
-  Chat.initGlobal(); // Start background badge tracking
 }
 
 function renderUserInfo() {
@@ -337,21 +331,13 @@ function navigateTo(section) {
 
   // Others button lights up for anything not on the bottom bar
   const othersBtn = document.getElementById('mobile-others-btn');
-  if (othersBtn) othersBtn.classList.toggle('active', ['saved', 'profile', 'education'].includes(section));
+  if (othersBtn) othersBtn.classList.toggle('active', ['profile', 'education'].includes(section));
 
   // Close Others popup whenever we navigate
   document.getElementById('mobile-more-popup')?.classList.remove('open');
 
-  // Manage chat updaters — stop all when leaving messages section
-  if (section !== 'messages') {
-    Chat.stopTimeUpdater();
-    Chat.stopMessagePoll();
-    Chat.stopRecording?.();
-  }
-
   const loaders = { overview: renderOverview, expenses: renderExpenses,
-    community: loadAndRenderCommunity, saved: loadAndRenderSaved,
-    education: renderEducation, profile: renderProfile, messages: () => Chat.init() };
+    education: renderEducation, profile: renderProfile };
   if (loaders[section]) loaders[section]();
 }
 
@@ -372,8 +358,8 @@ document.addEventListener('click', () => {
 
 // ── Dynamic Layout Sizing ─────────────────────────────────────
 // Replaces the static .dash-content::after spacer.
-// Runs on boot, resize, and orientation change so every section and the
-// chat panel fit the exact visible area on any device.
+// Runs on boot, resize, and orientation change so every section fits the
+// exact visible area on any device.
 
 function setupDynamicLayout() {
   _applyLayout();
@@ -410,7 +396,7 @@ function _applyLayout() {
   // -- Pin the layout container to the exact visible viewport height --
   if (dashLayout) dashLayout.style.height = `${Math.floor(vh)}px`;
 
-  // -- CSS variable (consumed by .chat-layout height calc and any other rule) --
+  // -- Published for any rule that needs the exact visible height --
   document.documentElement.style.setProperty('--available-vh', `${availH}px`);
 
   // -- dash-content bottom padding keeps scrollable content above the fixed nav --
@@ -421,11 +407,6 @@ function _applyLayout() {
     s.style.minHeight = `${availH}px`;
   });
 
-  // -- Chat layout gets an exact height (panel doesn't scroll; messages do) --
-  const chatLayout = document.querySelector('.chat-layout');
-  if (chatLayout) {
-    chatLayout.style.height = `${availH - padH * 2}px`;
-  }
 }
 
 // ── Data Loaders ─────────────────────────────────────────────
@@ -433,15 +414,6 @@ async function loadProfile()  { const { data } = await db.from('profiles').selec
 async function loadBalances() { const { data } = await db.from('account_balance').select('*').eq('user_id', App.user.id).order('sort_order').order('name'); App.balances = data || []; }
 // Kept only so the Expenses page can offer to import them once.
 async function loadRecurring() { const { data } = await db.from('recurring_transactions').select('*').eq('user_id', App.user.id).order('created_at'); App.recurring = data || []; }
-
-async function loadUserInteractions() {
-  const [l, s] = await Promise.all([
-    db.from('blueprint_likes').select('blueprint_id').eq('user_id', App.user.id),
-    db.from('saved_blueprints').select('blueprint_id').eq('user_id', App.user.id),
-  ]);
-  App.likedBlueprintIds = new Set((l.data || []).map(r => r.blueprint_id));
-  App.savedBlueprintIds = new Set((s.data || []).map(r => r.blueprint_id));
-}
 
 // ── ACCOUNT BALANCES ─────────────────────────────────────────
 // The user names each account they hold and says what is in it. Each figure is
@@ -1387,275 +1359,6 @@ function setupExpenseControls() {
   });
 }
 
-// ── COMMUNITY ─────────────────────────────────────────────────
-async function loadAndRenderCommunity() {
-  const feed = document.getElementById('blueprint-feed');
-  if (!feed) return;
-  feed.innerHTML = '<div class="loading-state">Loading community blueprints…</div>';
-
-  // Use two separate queries to avoid PostgREST join issues with auth.users FK
-  const [bpRes] = await Promise.all([
-    db.from('blueprints').select('*').eq('is_public', true)
-      .order('likes_count', { ascending: false }).limit(50),
-    loadUserInteractions(),
-  ]);
-
-  if (bpRes.error) { feed.innerHTML = `<div class="error-state">Could not load blueprints. (${bpRes.error.message})</div>`; return; }
-  const bps = bpRes.data || [];
-
-  // Fetch profiles for all blueprint authors in one query
-  const userIds = [...new Set(bps.map(b => b.user_id).filter(Boolean))];
-  if (userIds.length) {
-    const { data: profiles } = await db.from('profiles')
-      .select('id, username, nickname, avatar_url, avatar_url_storage').in('id', userIds);
-    const pMap = Object.fromEntries((profiles || []).map(p => [p.id, p]));
-    bps.forEach(b => { b.profiles = pMap[b.user_id] || null; });
-  }
-
-  App.blueprints = bps;
-  setupCommunitySearch();
-  renderCommunityFeed();
-}
-
-function renderCommunityFeed() {
-  const feed = document.getElementById('blueprint-feed');
-  if (!feed) return;
-
-  const query = App.communitySearch.trim().toLowerCase();
-  let bps = App.blueprints;
-  if (query) {
-    bps = bps.filter(b =>
-      b.title?.toLowerCase().includes(query) ||
-      b.description?.toLowerCase().includes(query) ||
-      b.strategy_type?.toLowerCase().includes(query) ||
-      b.tags?.some(t => t.toLowerCase().includes(query)) ||
-      b.profiles?.username?.toLowerCase().includes(query)
-    );
-  }
-
-  if (!bps.length) {
-    feed.innerHTML = `<div class="empty-state full"><div class="empty-icon">🌐</div>
-      <p>${query ? `No blueprints match "${query}".` : 'No blueprints yet — be the first to share!'}</p>
-      ${!query ? `<button class="btn btn-primary" onclick="openShareBlueprint()">Share Blueprint</button>` : ''}
-    </div>`;
-    return;
-  }
-  feed.innerHTML = bps.map(b => blueprintCard(b)).join('');
-}
-
-function blueprintCard(b) {
-  const user = b.profiles?.username || 'Anonymous';
-  return `<div class="blueprint-card" data-id="${b.id}">
-    <div class="bp-card-header">
-      <div class="bp-author">
-        <div class="bp-avatar">${UI.avatarInitials(user)}</div>
-        <div><span class="bp-username">${user}</span><span class="bp-time">${UI.timeAgo(b.created_at)}</span></div>
-      </div>
-      ${b.strategy_type ? `<span class="bp-tag">${b.strategy_type}</span>` : ''}
-    </div>
-    <h3 class="bp-title">${b.title}</h3>
-    ${b.description ? `<p class="bp-desc">${b.description}</p>` : ''}
-    <div class="bp-ratios">
-      ${Object.entries(b.ratios || {}).slice(0, 6).map(([k, v]) => `
-        <div class="bp-ratio-item">
-          <span class="bp-ratio-name">${k}</span>
-          <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${v}%;background:${bpColor(k)}"></div></div>
-          <span class="bp-ratio-pct">${v}%</span>
-        </div>`).join('')}
-    </div>
-    ${b.tags?.length ? `<div class="bp-tags">${b.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>` : ''}
-    <div class="bp-card-footer">${bpCardFooter(b)}</div>
-  </div>`;
-}
-
-// The like / comment / save row, split out so it can be repainted on its own
-// after a like or save without rebuilding — or reloading — the whole feed.
-function bpCardFooter(b) {
-  const liked = App.likedBlueprintIds.has(b.id);
-  const saved = App.savedBlueprintIds.has(b.id);
-  return `
-      <button class="bp-action-btn ${liked ? 'liked' : ''}" onclick="toggleLike('${b.id}')">♥ <span class="bp-like-count">${b.likes_count || 0}</span></button>
-      <button class="bp-action-btn" onclick="openBlueprintDetail('${b.id}')">💬 ${b.comments_count || 0}</button>
-      <button class="bp-action-btn ${saved ? 'saved' : ''}" onclick="toggleSave('${b.id}')">${saved ? '🔖 Saved' : '+ Save'}</button>`;
-}
-
-// Repaints a blueprint's footer everywhere it is on screen — the community
-// feed, the Saved grid and the Profile grid can all be showing the same card.
-function refreshBlueprintCards(id) {
-  const b = App.blueprints.find(x => x.id === id);
-  if (!b) return;
-  document.querySelectorAll(`.blueprint-card[data-id="${id}"] .bp-card-footer`)
-    .forEach(el => { el.innerHTML = bpCardFooter(b); });
-}
-
-function bpColor(key) {
-  const m = { saving: '#4CAF50', invest: '#2196F3', housing: '#F44336', food: '#FF9800',
-    debt: '#FF5252', needs: '#9C27B0', wants: '#E91E63', fun: '#00BCD4', transport: '#FF9800' };
-  const k = key.toLowerCase();
-  for (const [kw, v] of Object.entries(m)) if (k.includes(kw)) return v;
-  return '#BB885F';
-}
-
-// Both toggles repaint immediately and undo themselves if the write fails,
-// so the button always reflects what is actually stored.
-async function toggleLike(id) {
-  const liked = App.likedBlueprintIds.has(id);
-  const bp    = App.blueprints.find(b => b.id === id);
-
-  if (liked) App.likedBlueprintIds.delete(id); else App.likedBlueprintIds.add(id);
-  if (bp) bp.likes_count = Math.max(0, (bp.likes_count || 0) + (liked ? -1 : 1));
-  refreshBlueprintCards(id);
-
-  const { error } = liked
-    ? await db.from('blueprint_likes').delete().eq('blueprint_id', id).eq('user_id', App.user.id)
-    : await db.from('blueprint_likes').insert([{ blueprint_id: id, user_id: App.user.id }]);
-
-  if (error) {
-    if (liked) App.likedBlueprintIds.add(id); else App.likedBlueprintIds.delete(id);
-    if (bp) bp.likes_count = Math.max(0, (bp.likes_count || 0) + (liked ? 1 : -1));
-    refreshBlueprintCards(id);
-    UI.toast('Could not update your like.', 'error');
-  }
-}
-
-async function toggleSave(id) {
-  const saved = App.savedBlueprintIds.has(id);
-
-  if (saved) App.savedBlueprintIds.delete(id); else App.savedBlueprintIds.add(id);
-  refreshBlueprintCards(id);
-
-  const { error } = saved
-    ? await db.from('saved_blueprints').delete().eq('blueprint_id', id).eq('user_id', App.user.id)
-    : await db.from('saved_blueprints').insert([{ blueprint_id: id, user_id: App.user.id }]);
-
-  if (error) {
-    if (saved) App.savedBlueprintIds.add(id); else App.savedBlueprintIds.delete(id);
-    refreshBlueprintCards(id);
-    UI.toast('Could not update your saved blueprints.', 'error');
-    return;
-  }
-
-  UI.toast(saved ? 'Removed from saved.' : 'Blueprint saved!', saved ? 'info' : 'success');
-
-  // The Saved section is a filtered list, so it has to be rebuilt rather than repainted.
-  if (App.activeSection === 'saved') loadAndRenderSaved();
-}
-
-async function openBlueprintDetail(id) {
-  const bp = App.blueprints.find(b => b.id === id);
-  if (!bp) return;
-
-  const { data: comments } = await db.from('blueprint_comments')
-    .select('*, profiles(username)').eq('blueprint_id', id).is('parent_id', null).order('created_at');
-
-  setText('detail-title', bp.title);
-  setText('detail-description', bp.description || '');
-  document.getElementById('detail-blueprint-id').value = id;
-
-  const ratiosEl = document.getElementById('detail-ratios');
-  if (ratiosEl) ratiosEl.innerHTML = Object.entries(bp.ratios || {}).map(([k, v]) => `
-    <div class="bp-ratio-item">
-      <span class="bp-ratio-name">${k}</span>
-      <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${v}%;background:${bpColor(k)}"></div></div>
-      <span class="bp-ratio-pct">${v}%</span>
-    </div>`).join('');
-
-  const commentsEl = document.getElementById('detail-comments');
-  if (commentsEl) commentsEl.innerHTML = (comments || []).length
-    ? (comments || []).map(c => `
-        <div class="comment">
-          <div class="comment-header">
-            <span class="comment-author">${c.profiles?.username || 'User'}</span>
-            <span class="comment-time">${UI.timeAgo(c.created_at)}</span>
-          </div>
-          <p class="comment-text">${c.content}</p>
-        </div>`).join('')
-    : '<p class="no-comments">No comments yet. Start the discussion!</p>';
-
-  UI.openModal('blueprint-detail-modal');
-}
-
-async function submitComment() {
-  const content = document.getElementById('comment-input')?.value.trim();
-  const bpId    = document.getElementById('detail-blueprint-id')?.value;
-  if (!content) return;
-
-  const { error } = await db.from('blueprint_comments').insert([{ blueprint_id: bpId, user_id: App.user.id, content }]);
-  if (error) { UI.toast(error.message, 'error'); return; }
-  document.getElementById('comment-input').value = '';
-  UI.toast('Comment posted!', 'success');
-  await openBlueprintDetail(bpId);
-}
-
-// Share Blueprint
-function openShareBlueprint() {
-  const form = document.getElementById('share-blueprint-form');
-  if (form) form.reset();
-  const rows = document.getElementById('share-allocation-rows');
-  if (rows) { rows.innerHTML = ''; addShareRow(); }
-  UI.openModal('share-blueprint-modal');
-}
-
-function addShareRow() {
-  const c = document.getElementById('share-allocation-rows');
-  if (!c) return;
-  const row = document.createElement('div');
-  row.className = 'alloc-row';
-  row.innerHTML = `
-    <input type="text"   class="input share-cat-name" placeholder="e.g. Housing">
-    <input type="number" class="input share-cat-pct"  placeholder="%" min="0" max="100">
-    <button type="button" class="icon-btn del-btn" onclick="this.parentElement.remove()">✕</button>`;
-  c.appendChild(row);
-}
-
-async function shareBlueprint() {
-  const title    = document.getElementById('share-title')?.value.trim();
-  const desc     = document.getElementById('share-desc')?.value.trim();
-  const strategy = document.getElementById('share-strategy')?.value.trim();
-  const tagsRaw  = document.getElementById('share-tags')?.value.trim();
-
-  if (!title) { UI.toast('Title is required.', 'error'); return; }
-
-  const rows   = document.querySelectorAll('#share-allocation-rows .alloc-row');
-  const ratios = {};
-  rows.forEach(r => {
-    const name = r.querySelector('.share-cat-name').value.trim();
-    const pct  = parseFloat(r.querySelector('.share-cat-pct').value);
-    if (name && !isNaN(pct) && pct > 0) ratios[name] = pct;
-  });
-  if (!Object.keys(ratios).length) { UI.toast('Add at least one allocation ratio.', 'error'); return; }
-
-  const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
-  const { error } = await db.from('blueprints').insert([{
-    user_id: App.user.id, title, description: desc, ratios, strategy_type: strategy, tags, is_public: true
-  }]);
-  if (error) { UI.toast(error.message, 'error'); return; }
-  UI.toast('Blueprint shared with the community!', 'success');
-  UI.closeModal('share-blueprint-modal');
-  await loadAndRenderCommunity();
-}
-
-// ── SAVED BLUEPRINTS ──────────────────────────────────────────
-async function loadAndRenderSaved(gridId = 'saved-blueprints-grid') {
-  const el = document.getElementById(gridId);
-  if (!el) return;
-  el.innerHTML = '<div class="loading-state">Loading saved blueprints…</div>';
-
-  const { data, error } = await db.from('saved_blueprints')
-    .select('*, blueprints(*, profiles(username))').eq('user_id', App.user.id).order('created_at', { ascending: false });
-
-  await loadUserInteractions();
-
-  if (error || !data?.length) {
-    el.innerHTML = `<div class="empty-state full"><div class="empty-icon">🔖</div><p>You haven't saved any blueprints yet.</p>
-      <button class="btn btn-primary" onclick="navigateTo('community')">Browse Community</button></div>`;
-    return;
-  }
-  const blueprints = data.map(d => d.blueprints).filter(Boolean);
-  blueprints.forEach(b => { if (!App.blueprints.find(x => x.id === b.id)) App.blueprints.push(b); });
-  el.innerHTML = blueprints.map(b => blueprintCard(b)).join('');
-}
-
 // ── EDUCATION ─────────────────────────────────────────────────
 function renderEducation() {} // Static content in HTML
 
@@ -1691,12 +1394,11 @@ function renderProfile() {
     });
   }
 
-  setText('profile-stat-expenses', (App.expenses || []).filter(e => e.is_active).length);
-  setText('profile-stat-groups',   (App.expenseGroups || []).length);
-  setText('profile-stat-monthly',
+  setProfileStat('profile-stat-expenses', (App.expenses || []).filter(e => e.is_active).length);
+  setProfileStat('profile-stat-groups',   (App.expenseGroups || []).length);
+  setProfileStat('profile-stat-monthly',
     UI.currency((App.expenses || []).filter(e => e.is_active).reduce((s, e) => s + monthlyCost(e), 0)));
 
-  loadAndRenderSaved('profile-saved-blueprints-grid');
 }
 
 async function uploadAvatar(file) {
@@ -1763,62 +1465,36 @@ async function saveProfile() {
   renderUserInfo();
 }
 
-// ── REALTIME ─────────────────────────────────────────────────
-function subscribeToBlueprints() {
-  db.channel('blueprints-realtime')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'blueprints' }, () => {
-      if (App.activeSection === 'community') loadAndRenderCommunity();
-    }).subscribe();
-}
-
-// ── COMMUNITY SEARCH ─────────────────────────────────────────
-
-function setupCommunitySearch() {
-  const input = document.getElementById('community-search-input');
-  if (!input || input.dataset.wired) return;
-  input.dataset.wired = '1';
-  let searchTimer;
-  input.addEventListener('input', () => {
-    App.communitySearch = input.value;
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(async () => {
-      renderCommunityFeed();
-      await renderUserSearchResults(input.value.trim());
-    }, 300);
-  });
-}
-
-async function renderUserSearchResults(query) {
-  const el = document.getElementById('user-search-results');
-  if (!el) return;
-  if (!query || query.length < 2) { el.innerHTML = ''; return; }
-
-  const { data, error } = await db.rpc('search_users', { query, limit_count: 8 });
-  if (error || !data?.length) { el.innerHTML = ''; return; }
-
-  // Filter out users who have blocked me (they won't appear in my searches)
-  const _blocked = typeof Chat !== 'undefined' ? Chat.getBlockedByOthers() : new Set();
-  const visible  = data.filter(u => !_blocked.has(u.id));
-  if (!visible.length) { el.innerHTML = ''; return; }
-
-  el.innerHTML = `
-    <div class="user-search-header">People matching "${query}"</div>
-    ${visible.map(u => {
-      const avatar = u.avatar_url_storage || u.avatar_url;
-      const name   = u.nickname || u.username;
-      return `<div class="user-search-card">
-        <div class="user-search-avatar">${avatar ? `<img src="${avatar}" alt="${name}">` : UI.avatarInitials(name)}</div>
-        <div class="user-search-info">
-          <span class="user-search-name">${name}</span>
-          <span class="user-search-handle">@${u.username}</span>
-        </div>
-        <button class="btn btn-sm btn-outline" onclick="Chat.startChat('${u.id}','${name}','${u.username}')">Message</button>
-      </div>`;
-    }).join('')}`;
-}
-
 // ── HELPERS ───────────────────────────────────────────────────
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
+
+// A profile figure is shown in full up to ten digits. Past that it is clipped
+// to one line and marked, and a tap opens it out — a monthly total can run to
+// eleven digits in rupiah, and squeezing it to fit would make it unreadable.
+const PROFILE_STAT_MAX_DIGITS = 10;
+
+function setProfileStat(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const text   = String(value);
+  const digits = (text.match(/\d/g) || []).length;
+  const long   = digits > PROFILE_STAT_MAX_DIGITS;
+
+  el.textContent = text;
+  el.title = long ? text : '';
+  el.classList.toggle('is-long', long);
+  el.classList.remove('expanded');
+
+  if (!long) { el.onclick = null; el.removeAttribute('role'); el.removeAttribute('tabindex'); return; }
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.onclick = () => el.classList.toggle('expanded');
+  el.onkeydown = e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    el.classList.toggle('expanded');
+  };
+}
 
 // ── SETTINGS ─────────────────────────────────────────────────
 function updateCurrencyBanner() {

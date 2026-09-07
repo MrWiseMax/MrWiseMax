@@ -42,11 +42,6 @@
         <button class="nav-item active" data-nav="overview"><span class="nav-icon">📊</span> Overview</button>
         <button class="nav-item" data-nav="expenses"><span class="nav-icon">🧾</span> Expenses</button>
 
-        <div class="nav-section-label" style="margin-top:8px">Community</div>
-        <button class="nav-item" data-nav="community"><span class="nav-icon">🌐</span> Community Feed</button>
-        <button class="nav-item" data-nav="saved"><span class="nav-icon">🔖</span> Saved Blueprints</button>
-        <button class="nav-item" data-nav="messages"><span class="nav-icon">💬</span> Messages</button>
-
         <div class="nav-section-label" style="margin-top:8px">Learn</div>
         <button class="nav-item" data-nav="education"><span class="nav-icon">🎓</span> Education</button>
       </nav>
@@ -76,11 +71,6 @@
           </button>
         </div>
         <div class="topbar-actions">
-          <button class="topbar-messages-btn" data-nav="messages" onclick="navigateTo('messages')" title="Messages">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-            </svg>
-          </button>
         </div>
       </header>
 
@@ -194,45 +184,8 @@
       ═══════════════════════════════════════ -->
 
         <!-- ═══════════════════════════════════════
-           SECTION: COMMUNITY
-      ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-community">
-          <div class="community-header">
-            <div>
-              <h1 class="section-title">Community Feed</h1>
-              <p class="section-subtitle">Explore budgeting blueprints and connect with others.</p>
-            </div>
-            <button class="btn btn-primary" onclick="openShareBlueprint()">+ Share Blueprint</button>
-          </div>
-
-          <!-- Search bar -->
-          <div class="community-search-wrap">
-            <div class="community-search-box">
-              <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5" />
-                <path d="M10 10l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-              </svg>
-              <input type="text" id="community-search-input" class="community-search-input"
-                placeholder="Search blueprints, strategies, or @usernames…" autocomplete="off">
-            </div>
-          </div>
-
-          <!-- User search results (appears when searching) -->
-          <div id="user-search-results"></div>
-
-          <div class="blueprint-feed" id="blueprint-feed">
-            <div class="loading-state">Loading community blueprints…</div>
-          </div>
-        </section>
-
-        <!-- ═══════════════════════════════════════
            SECTION: SAVED
       ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-saved">
-          <h1 class="section-title">Saved Blueprints</h1>
-          <p class="section-subtitle">Budgeting strategies you've bookmarked for reference.</p>
-          <div class="blueprint-feed" id="saved-blueprints-grid"></div>
-        </section>
 
         <!-- ═══════════════════════════════════════
            SECTION: EDUCATION
@@ -383,59 +336,6 @@
             </div>
           </div>
 
-          <!-- Saved Blueprints embedded in Profile -->
-          <div class="card" style="margin-top:20px">
-            <div class="card-title" style="margin-bottom:14px">🔖 Saved Blueprints</div>
-            <div class="blueprint-feed" id="profile-saved-blueprints-grid"></div>
-          </div>
-
-        </section>
-
-        <!-- ═══════════════════════════════════════
-           SECTION: MESSAGES
-      ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-messages">
-          <div class="chat-layout">
-
-            <!-- Left: Contact List -->
-            <div class="chat-sidebar">
-              <div class="chat-sidebar-header">
-                <h2 class="chat-sidebar-title">Messages</h2>
-              </div>
-
-              <!-- Search contacts -->
-              <div class="chat-search-wrap">
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="color:var(--text-dim);flex-shrink:0">
-                  <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5" />
-                  <path d="M10 10l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-                </svg>
-                <input type="text" id="chat-search-input" class="chat-search-input" placeholder="Search contacts…"
-                  autocomplete="off">
-              </div>
-
-              <!-- Filter tabs: All / Primary / General -->
-              <div class="chat-filter-tabs">
-                <button class="chat-filter-btn active" data-filter="all" onclick="Chat.setFilter('all')">All</button>
-                <button class="chat-filter-btn" data-filter="primary"
-                  onclick="Chat.setFilter('primary')">Primary</button>
-                <button class="chat-filter-btn" data-filter="general"
-                  onclick="Chat.setFilter('general')">General</button>
-              </div>
-
-              <div class="chat-contact-list" id="chat-contact-list">
-                <div class="loading-state" style="padding:24px">Loading…</div>
-              </div>
-            </div>
-
-            <!-- Right: Chat Window -->
-            <div class="chat-window" id="chat-window">
-              <div class="chat-placeholder">
-                <div class="chat-placeholder-icon">💬</div>
-                <p>Select a conversation or search for a user in the Community tab to start chatting.</p>
-              </div>
-            </div>
-
-          </div>
         </section>
 
       </main><!-- /.dash-content -->
@@ -444,9 +344,6 @@
 
   <!-- ── Others Popup (sits above mobile nav) ───────────────────── -->
   <div class="mobile-more-popup" id="mobile-more-popup">
-    <button class="mobile-more-item" onclick="mobileMoreNav('saved')">
-      <span class="mobile-more-icon">🔖</span>Saved Blueprints
-    </button>
     <button class="mobile-more-item" onclick="mobileMoreNav('profile')">
       <span class="mobile-more-icon">👤</span>Profile
     </button>
@@ -462,9 +359,6 @@
     </button>
     <button class="mobile-nav-item" data-nav="expenses">
       <span class="mobile-nav-icon">🧾</span>Expenses
-    </button>
-    <button class="mobile-nav-item" data-nav="community">
-      <span class="mobile-nav-icon">🌐</span>Community
     </button>
     <button class="mobile-nav-item" id="mobile-others-btn" onclick="toggleMobileMore(event)">
       <span class="mobile-nav-icon">
@@ -553,7 +447,7 @@
             <option value="weekly">Every week</option>
             <option value="monthly" selected>Every month</option>
             <option value="yearly">Every year</option>
-            <option value="custom">Every N days…</option>
+            <option value="custom">Custom days…</option>
           </select>
         </div>
       </div>
@@ -620,76 +514,7 @@
     </div>
   </div>
 
-  <!-- Share Blueprint -->
-  <div class="modal" id="share-blueprint-modal">
-    <div class="modal-box modal-lg">
-      <div class="modal-header">
-        <h2>Share a Budget Blueprint</h2>
-        <button class="modal-close" onclick="UI.closeModal('share-blueprint-modal')">✕</button>
-      </div>
-      <p style="font-size:0.82rem;color:var(--text-muted);margin-bottom:18px">
-        Share your budgeting strategy anonymously. <strong>Do not include real dollar amounts</strong> — percentages
-        only.
-      </p>
-      <form id="share-blueprint-form" onsubmit="return false">
-        <div class="form-group">
-          <label class="label">Blueprint Title *</label>
-          <input type="text" class="input" id="share-title" placeholder="e.g. My FIRE Strategy">
-        </div>
-        <div class="input-row">
-          <div class="form-group">
-            <label class="label">Strategy Type</label>
-            <input type="text" class="input" id="share-strategy" placeholder="e.g. FIRE, Debt Snowball…">
-          </div>
-          <div class="form-group">
-            <label class="label">Tags (comma-separated)</label>
-            <input type="text" class="input" id="share-tags" placeholder="investing, savings, debt-free">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="label">Description (optional)</label>
-          <textarea class="input" id="share-desc" rows="2"
-            placeholder="What makes this strategy work for you?"></textarea>
-        </div>
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <label class="label" style="margin:0">Budget Ratios (% only — no real numbers)</label>
-          <button type="button" class="btn btn-sm btn-outline" onclick="addShareRow()">+ Add Row</button>
-        </div>
-        <div id="share-allocation-rows"></div>
-      </form>
-
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="UI.closeModal('share-blueprint-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="shareBlueprint()">Share with Community</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Blueprint Detail + Comments -->
-  <div class="modal" id="blueprint-detail-modal">
-    <div class="modal-box modal-lg">
-      <div class="modal-header">
-        <h2 id="detail-title"></h2>
-        <button class="modal-close" onclick="UI.closeModal('blueprint-detail-modal')">✕</button>
-      </div>
-      <p id="detail-description" style="font-size:0.875rem;color:var(--text-muted);margin-bottom:18px"></p>
-
-      <div class="card-title">Budget Ratios</div>
-      <div id="detail-ratios" class="detail-ratios"></div>
-
-      <div class="card-title" style="margin-top:20px">Community Discussion</div>
-      <div class="comments-list" id="detail-comments"></div>
-
-      <div class="comment-input-row">
-        <input type="text" class="input" id="comment-input" placeholder="Share your thoughts or advice…"
-          onkeydown="if(event.key==='Enter')submitComment()">
-        <button class="btn btn-primary btn-sm" onclick="submitComment()">Post</button>
-      </div>
-
-      <input type="hidden" id="detail-blueprint-id">
-    </div>
-  </div>
 
 
   <!-- Currency Modal -->
@@ -735,11 +560,9 @@
 
   <!-- ── Scripts ───────────────────────────────────────────────── -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="assets/js/supabase.js"></script>
   <script src="assets/js/ui.js"></script>
   <script src="assets/js/budgeting-auth.js"></script>
-  <script src="assets/js/budgeting-chat.js"></script>
   <script src="assets/js/nav-history.js"></script>
   <script src="assets/js/budgeting-dashboard.js"></script>
   <script>

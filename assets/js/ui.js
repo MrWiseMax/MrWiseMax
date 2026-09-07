@@ -27,17 +27,15 @@ const UI = (() => {
   }
 
   // ── Modal System ─────────────────────────────────────────
-  // Closing runs through a short `modal-closing` state so the box can fade
-  // out; `modal-open` still comes off immediately, which is what NavHistory
-  // and the scroll lock watch.
-  const MODAL_FADE_MS = 220;
-
+  // Opening and closing are the same single class toggle; the fade in both
+  // directions is a CSS transition, so the browser owns the timing. An
+  // earlier version timed the fade-out with setTimeout, which browsers are
+  // free to throttle — the modal would sometimes snap away instead.
   function openModal(id) {
     const modal = document.getElementById(id);
     if (!modal) return;
-    clearTimeout(modal._closeTimer);
-    modal.classList.remove('modal-closing');
     modal.classList.add('modal-open');
+    modal.removeAttribute('aria-hidden');
     document.body.style.overflow = 'hidden';
   }
 
@@ -45,9 +43,7 @@ const UI = (() => {
     const modal = document.getElementById(id);
     if (!modal || !modal.classList.contains('modal-open')) return;
     modal.classList.remove('modal-open');
-    modal.classList.add('modal-closing');
-    clearTimeout(modal._closeTimer);
-    modal._closeTimer = setTimeout(() => modal.classList.remove('modal-closing'), MODAL_FADE_MS);
+    modal.setAttribute('aria-hidden', 'true');
     releaseScrollLock();
   }
 
@@ -55,6 +51,12 @@ const UI = (() => {
     document.querySelectorAll('.modal.modal-open').forEach(m => closeModal(m.id));
     releaseScrollLock();
   }
+
+  // Every modal starts shut.
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.modal:not(.modal-open)')
+      .forEach(m => m.setAttribute('aria-hidden', 'true'));
+  });
 
   // Only give the page its scrollbar back once nothing is still open —
   // the confirm dialog stacks on top of other modals.

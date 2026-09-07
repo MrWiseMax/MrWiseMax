@@ -11,6 +11,10 @@ const App = {
   // Read only, to offer a one-time import of the previous version's entries.
   recurring: [],
   activeSection: 'overview',
+  // The page currently on screen. Starts empty so the first render still
+  // counts as an arrival; after that it is what tells a real move apart from
+  // a re-render of the page you are already looking at.
+  shownSection: null,
   coverageMonths: 1,
   expenseFilters: { search: '', sort: 'due' },
   editing: { expense: null, group: null },
@@ -306,7 +310,13 @@ function navigateTo(section) {
   // Account lives on the mobile bar only; on a wide screen the sidebar
   // already shows the address and the sign-out button.
   if (section === 'account' && !isNarrow()) section = 'overview';
+
+  // Tapping the tab of the page you are already on is not a move, and neither
+  // is a refresh after changing currency. The page still re-renders; it just
+  // does it in place, with none of the arrival animation.
+  const arriving = section !== App.shownSection;
   App.activeSection = section;
+  App.shownSection  = section;
   UI.showSection(section);
 
   // Entrance animations are keyed off this flag, which is dropped shortly
@@ -314,9 +324,15 @@ function navigateTo(section) {
   // when a re-render replaces them while you are typing or editing.
   const pane = document.getElementById(`section-${section}`);
   if (pane) {
-    pane.setAttribute('data-fresh', '');
     clearTimeout(pane._freshTimer);
-    pane._freshTimer = setTimeout(() => pane.removeAttribute('data-fresh'), 750);
+    if (arriving) {
+      pane.setAttribute('data-fresh', '');
+      pane._freshTimer = setTimeout(() => pane.removeAttribute('data-fresh'), 750);
+    } else {
+      // Clear it outright: a repeat tap part-way through an arrival should
+      // settle the page, not hand the animation to the rows replacing it.
+      pane.removeAttribute('data-fresh');
+    }
   }
   document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === section));
 

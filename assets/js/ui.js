@@ -110,8 +110,12 @@ const UI = (() => {
 
   // ── Section Navigation ───────────────────────────────────
   function showSection(sectionId) {
-    document.querySelectorAll('.dash-section').forEach(s => s.classList.remove('active'));
     const target = document.getElementById(`section-${sectionId}`);
+    // Already showing: leave the class alone. Stripping and re-adding it in
+    // one go happens to be invisible to the browser, but only by accident of
+    // when styles are flushed — not worth resting the page animation on.
+    if (target && target.classList.contains('active')) return;
+    document.querySelectorAll('.dash-section').forEach(s => s.classList.remove('active'));
     if (target) target.classList.add('active');
   }
 

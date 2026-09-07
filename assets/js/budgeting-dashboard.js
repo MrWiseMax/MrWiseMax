@@ -5,7 +5,6 @@
 // ── App State ────────────────────────────────────────────────
 const App = {
   user: null,
-  profile: null,
   balances: [],
   expenses: [],
   expenseGroups: [],
@@ -262,7 +261,7 @@ async function initDashboard() {
   document.getElementById('page-loader').style.display = 'none';
   renderUserInfo();
 
-  await Promise.all([loadProfile(), loadExpenseGroups(), loadExpenses(), loadBalances(), loadRecurring()]);
+  await Promise.all([loadExpenseGroups(), loadExpenses(), loadBalances(), loadRecurring()]);
 
   // Rates must be in place before anything renders: every amount is converted
   // from the currency it was saved in into the one being displayed.
@@ -270,7 +269,6 @@ async function initDashboard() {
   // A charge date left in the past belongs on its real next date.
   await rollForwardDueDates();
 
-  renderUserInfo(); // Re-render with full profile data (nickname + custom avatar)
   initCurrencyInputs();
   // Enter in either field of an account row saves that row.
   document.getElementById('balance-accounts')?.addEventListener('keydown', e => {
@@ -287,19 +285,13 @@ async function initDashboard() {
   setupDynamicLayout();
 }
 
+// The one piece of identity the app still shows: which account you are in.
+// It comes from the auth session, not from a stored profile.
 function renderUserInfo() {
-  const nickname = App.profile?.nickname;
-  const name     = nickname || App.profile?.full_name || App.user.user_metadata?.full_name || App.user.email?.split('@')[0] || 'User';
-  const username = App.profile?.username ? `@${App.profile.username}` : '';
-  // Prefer custom-uploaded avatar, then Google avatar
-  const avatar   = App.profile?.avatar_url_storage || App.user.user_metadata?.avatar_url || App.profile?.avatar_url;
-
-  document.querySelectorAll('.user-name-display').forEach(el => (el.textContent = name));
-  document.querySelectorAll('.user-username-display').forEach(el => (el.textContent = username));
-  document.querySelectorAll('.user-avatar').forEach(el => {
-    el.innerHTML = avatar
-      ? `<img src="${avatar}" alt="${name}" onerror="this.parentElement.textContent='${UI.avatarInitials(name)}';">`
-      : UI.avatarInitials(name);
+  const email = App.user?.email || '';
+  document.querySelectorAll('.user-email-display').forEach(el => {
+    el.textContent = email;
+    el.title = email;
   });
 }
 
@@ -331,13 +323,13 @@ function navigateTo(section) {
 
   // Others button lights up for anything not on the bottom bar
   const othersBtn = document.getElementById('mobile-others-btn');
-  if (othersBtn) othersBtn.classList.toggle('active', ['profile', 'education'].includes(section));
+  if (othersBtn) othersBtn.classList.toggle('active', section === 'education');
 
   // Close Others popup whenever we navigate
   document.getElementById('mobile-more-popup')?.classList.remove('open');
 
   const loaders = { overview: renderOverview, expenses: renderExpenses,
-    education: renderEducation, profile: renderProfile };
+    education: renderEducation };
   if (loaders[section]) loaders[section]();
 }
 
@@ -410,7 +402,6 @@ function _applyLayout() {
 }
 
 // ── Data Loaders ─────────────────────────────────────────────
-async function loadProfile()  { const { data } = await db.from('profiles').select('*').eq('id', App.user.id).single(); if (data) App.profile = data; }
 async function loadBalances() { const { data } = await db.from('account_balance').select('*').eq('user_id', App.user.id).order('sort_order').order('name'); App.balances = data || []; }
 // Kept only so the Expenses page can offer to import them once.
 async function loadRecurring() { const { data } = await db.from('recurring_transactions').select('*').eq('user_id', App.user.id).order('created_at'); App.recurring = data || []; }
@@ -1362,139 +1353,8 @@ function setupExpenseControls() {
 // ── EDUCATION ─────────────────────────────────────────────────
 function renderEducation() {} // Static content in HTML
 
-// ── PROFILE ───────────────────────────────────────────────────
-function renderProfile() {
-  const name   = App.profile?.nickname || App.profile?.full_name || App.user.user_metadata?.full_name || '';
-  const avatar = App.profile?.avatar_url_storage || App.user.user_metadata?.avatar_url || App.profile?.avatar_url || '';
-
-  setText('profile-email', App.user.email || '');
-  const uEl = document.getElementById('profile-username-input'); if (uEl) uEl.value = App.profile?.username || '';
-  const nEl = document.getElementById('profile-nickname-input'); if (nEl) nEl.value = App.profile?.nickname || '';
-  const bEl = document.getElementById('profile-bio-input');      if (bEl) bEl.value = App.profile?.bio || '';
-
-  const avEl = document.getElementById('profile-avatar-display');
-  if (avEl) {
-    avEl.innerHTML = avatar
-      ? `<img src="${avatar}" alt="${name}" onerror="this.style.display='none'">`
-      : `<span>${UI.avatarInitials(name || App.profile?.username || 'U')}</span>`;
-  }
-
-  // Wire up avatar upload → crop flow
-  const fileInput = document.getElementById('profile-avatar-file');
-  const uploadBtn = document.getElementById('profile-avatar-upload-btn');
-  if (uploadBtn && fileInput && !uploadBtn.dataset.wired) {
-    uploadBtn.dataset.wired = '1';
-    uploadBtn.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      fileInput.value = '';
-      if (!file) return;
-      if (file.size > 10 * 1024 * 1024) { UI.toast('Image must be under 10 MB.', 'error'); return; }
-      openCropModal(file);
-    });
-  }
-
-  setProfileStat('profile-stat-expenses', (App.expenses || []).filter(e => e.is_active).length);
-  setProfileStat('profile-stat-groups',   (App.expenseGroups || []).length);
-  setProfileStat('profile-stat-monthly',
-    UI.currency((App.expenses || []).filter(e => e.is_active).reduce((s, e) => s + monthlyCost(e), 0)));
-
-}
-
-async function uploadAvatar(file) {
-  const ext  = file.name.split('.').pop().toLowerCase() || 'jpg';
-  const path = `${App.user.id}/avatar.${ext}`;
-  const { error } = await db.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
-  if (error) { UI.toast('Upload failed: ' + error.message, 'error'); return null; }
-  const { data } = db.storage.from('avatars').getPublicUrl(path);
-  // Persist to profile
-  await db.from('profiles').update({ avatar_url_storage: data.publicUrl, updated_at: new Date().toISOString() }).eq('id', App.user.id);
-  return data.publicUrl;
-}
-
-async function saveProfile() {
-  const username = document.getElementById('profile-username-input')?.value.trim().toLowerCase();
-  const nickname = document.getElementById('profile-nickname-input')?.value.trim();
-  const bio      = document.getElementById('profile-bio-input')?.value.trim();
-  if (!username) { UI.toast('Username cannot be empty.', 'error'); return; }
-
-  // Validate username format
-  const usernameOk = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(username) && username.length >= 3 && !username.includes('--');
-  if (!usernameOk) { UI.toast('Invalid username format. Use 3–30 lowercase letters, numbers, or hyphens.', 'error'); return; }
-
-  const DAY = 24 * 60 * 60 * 1000;
-
-  // Username: once every 30 days. The database trigger enforces this as well —
-  // these checks exist to fail fast with a clear message before any request.
-  if (username !== App.profile?.username) {
-    const lastChanged = App.profile?.username_changed_at;
-    if (lastChanged) {
-      const daysSince = (Date.now() - new Date(lastChanged).getTime()) / DAY;
-      if (daysSince < 30) {
-        const daysLeft = Math.ceil(30 - daysSince);
-        UI.toast(`Username can only be changed once every 30 days. Try again in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}.`, 'error');
-        return;
-      }
-    }
-    const { data: available } = await db.rpc('is_username_available', { requested_username: username, requesting_user_id: App.user.id });
-    if (!available) { UI.toast('That username is already taken.', 'error'); return; }
-  }
-
-  // Display name: twice every 14 days, counted over a rolling window.
-  const newNickname = nickname || null;
-  if (newNickname !== (App.profile?.nickname ?? null)) {
-    const recent = (App.profile?.nickname_changed_at || [])
-      .map(ts => new Date(ts).getTime())
-      .filter(ts => Date.now() - ts < 14 * DAY)
-      .sort((a, b) => a - b);
-    if (recent.length >= 2) {
-      const daysLeft = Math.max(1, Math.ceil((recent[0] + 14 * DAY - Date.now()) / DAY));
-      UI.toast(`Display name can only be changed twice every 14 days. Try again in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}.`, 'error');
-      return;
-    }
-  }
-
-  // username_changed_at and nickname_changed_at are maintained by the database
-  // trigger; anything sent from here would just be overwritten.
-  const updates = { username, bio, nickname: newNickname, updated_at: new Date().toISOString() };
-
-  const { error } = await db.from('profiles').update(updates).eq('id', App.user.id);
-  if (error) { UI.toast(error.message, 'error'); return; }
-  UI.toast('Profile updated!', 'success');
-  await loadProfile();
-  renderUserInfo();
-}
-
 // ── HELPERS ───────────────────────────────────────────────────
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
-
-// A profile figure is shown in full up to ten digits. Past that it is clipped
-// to one line and marked, and a tap opens it out — a monthly total can run to
-// eleven digits in rupiah, and squeezing it to fit would make it unreadable.
-const PROFILE_STAT_MAX_DIGITS = 10;
-
-function setProfileStat(id, value) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const text   = String(value);
-  const digits = (text.match(/\d/g) || []).length;
-  const long   = digits > PROFILE_STAT_MAX_DIGITS;
-
-  el.textContent = text;
-  el.title = long ? text : '';
-  el.classList.toggle('is-long', long);
-  el.classList.remove('expanded');
-
-  if (!long) { el.onclick = null; el.removeAttribute('role'); el.removeAttribute('tabindex'); return; }
-  el.setAttribute('role', 'button');
-  el.setAttribute('tabindex', '0');
-  el.onclick = () => el.classList.toggle('expanded');
-  el.onkeydown = e => {
-    if (e.key !== 'Enter' && e.key !== ' ') return;
-    e.preventDefault();
-    el.classList.toggle('expanded');
-  };
-}
 
 // ── SETTINGS ─────────────────────────────────────────────────
 function updateCurrencyBanner() {
@@ -1662,217 +1522,3 @@ document.addEventListener('DOMContentLoaded', () => {
   initDashboard();
   setupSignOut();
 });
-
-// ── IMAGE CROP ────────────────────────────────────────────────
-const _crop = { file: null, x: 0, y: 0, size: 0 };
-
-function openCropModal(file) {
-  const reader = new FileReader();
-  reader.onload = ev => {
-    _crop.file = file;
-    const img = document.getElementById('crop-source-img');
-    img.onload = () => { setupCropBox(); initCropDrag(); };
-    img.src = ev.target.result;
-    UI.openModal('crop-modal');
-  };
-  reader.readAsDataURL(file);
-}
-
-function setupCropBox() {
-  const img  = document.getElementById('crop-source-img');
-  const wrap = document.getElementById('crop-wrap');
-  const ir   = img.getBoundingClientRect();
-  const wr   = wrap.getBoundingClientRect();
-  const size = Math.round(Math.min(ir.width, ir.height) * 0.72);
-  _crop.x    = Math.round((ir.width  - size) / 2 + ir.left - wr.left);
-  _crop.y    = Math.round((ir.height - size) / 2 + ir.top  - wr.top);
-  _crop.size = size;
-  applyCropBox();
-  updateCropPreview();
-}
-
-function applyCropBox() {
-  const box = document.getElementById('crop-box');
-  if (!box) return;
-  box.style.left   = _crop.x + 'px';
-  box.style.top    = _crop.y + 'px';
-  box.style.width  = _crop.size + 'px';
-  box.style.height = _crop.size + 'px';
-}
-
-function clampCrop() {
-  const img  = document.getElementById('crop-source-img');
-  const wrap = document.getElementById('crop-wrap');
-  if (!img || !wrap) return;
-  const ir = img.getBoundingClientRect();
-  const wr = wrap.getBoundingClientRect();
-  const ox = ir.left - wr.left;
-  const oy = ir.top  - wr.top;
-  _crop.size = Math.max(40, Math.min(Math.min(ir.width, ir.height), _crop.size));
-  _crop.x    = Math.max(ox, Math.min(ox + ir.width  - _crop.size, _crop.x));
-  _crop.y    = Math.max(oy, Math.min(oy + ir.height - _crop.size, _crop.y));
-}
-
-function updateCropPreview() {
-  const canvas = document.getElementById('crop-preview-canvas');
-  const img    = document.getElementById('crop-source-img');
-  const wrap   = document.getElementById('crop-wrap');
-  if (!canvas || !img || !wrap) return;
-  const ir  = img.getBoundingClientRect();
-  const wr  = wrap.getBoundingClientRect();
-  const ox  = ir.left - wr.left;
-  const oy  = ir.top  - wr.top;
-  const sx  = img.naturalWidth  / ir.width;
-  const sy  = img.naturalHeight / ir.height;
-  const cx  = (_crop.x - ox) * sx;
-  const cy  = (_crop.y - oy) * sy;
-  const cs  = _crop.size * sx;
-  const OUT = 56;
-  canvas.width = OUT; canvas.height = OUT;
-  const ctx = canvas.getContext('2d');
-  ctx.save();
-  ctx.beginPath(); ctx.arc(OUT / 2, OUT / 2, OUT / 2, 0, Math.PI * 2); ctx.clip();
-  ctx.drawImage(img, cx, cy, cs, cs, 0, 0, OUT, OUT);
-  ctx.restore();
-}
-
-function initCropDrag() {
-  const box = document.getElementById('crop-box');
-  if (!box || box.dataset.wired) return;
-  box.dataset.wired = '1';
-  let startX, startY, startCX, startCY, startSz, mode;
-
-  box.addEventListener('pointerdown', e => {
-    const tgt = e.target;
-    mode   = tgt.classList.contains('crop-handle') ? tgt.dataset.dir : 'move';
-    startX = e.clientX; startY = e.clientY;
-    startCX = _crop.x; startCY = _crop.y; startSz = _crop.size;
-    box.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  });
-
-  box.addEventListener('pointermove', e => {
-    if (!mode) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    if (mode === 'move') {
-      _crop.x = startCX + dx;
-      _crop.y = startCY + dy;
-    } else if (mode === 'se') {
-      _crop.size = startSz + dx;
-    } else if (mode === 'nw') {
-      _crop.size = startSz - dx;
-      _crop.x = startCX + dx;
-      _crop.y = startCY + dx;
-    } else if (mode === 'ne') {
-      _crop.size = startSz + dx;
-      _crop.y = startCY - dx;
-    } else if (mode === 'sw') {
-      _crop.size = startSz + dy;
-      _crop.x = startCX - dy;
-    }
-    clampCrop(); applyCropBox(); updateCropPreview();
-  });
-
-  box.addEventListener('pointerup', () => { mode = null; });
-}
-
-async function confirmCrop() {
-  const img  = document.getElementById('crop-source-img');
-  const wrap = document.getElementById('crop-wrap');
-  if (!img || !wrap) return;
-  const ir  = img.getBoundingClientRect();
-  const wr  = wrap.getBoundingClientRect();
-  const ox  = ir.left - wr.left;
-  const oy  = ir.top  - wr.top;
-  const sx  = img.naturalWidth  / ir.width;
-  const sy  = img.naturalHeight / ir.height;
-  const cx  = (_crop.x - ox) * sx;
-  const cy  = (_crop.y - oy) * sy;
-  const cs  = _crop.size * sx;
-  const OUT = 512;
-  const canvas = document.getElementById('crop-canvas');
-  canvas.width = OUT; canvas.height = OUT;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, cx, cy, cs, cs, 0, 0, OUT, OUT);
-  canvas.toBlob(async blob => {
-    UI.closeModal('crop-modal');
-    const uploadBtn = document.getElementById('profile-avatar-upload-btn');
-    if (uploadBtn) { uploadBtn.textContent = 'Uploading…'; uploadBtn.disabled = true; }
-    const file = new File([blob], 'avatar.jpg', { type: 'image/jpeg' });
-    const url  = await uploadAvatar(file);
-    if (url) {
-      App.profile.avatar_url_storage = url;
-      renderUserInfo();
-      renderProfile();
-      UI.toast('Profile photo updated!', 'success');
-    }
-    if (uploadBtn) { uploadBtn.textContent = 'Change Photo'; uploadBtn.disabled = false; }
-  }, 'image/jpeg', 0.92);
-}
-
-// -- PWA Install Banner ----------------------------------------
-(function () {
-  const DISMISSED_KEY = 'mrwisemax_pwa_dismissed';
-  let _deferredPrompt = null;
-
-  const banner     = document.getElementById('pwa-install-banner');
-  const installBtn = document.getElementById('pwa-install-btn');
-  const dismissBtn = document.getElementById('pwa-dismiss-btn');
-
-  if (!banner) return;
-
-  // Already running as an installed PWA — never show the banner
-  const isStandalone = window.navigator.standalone === true ||
-                       window.matchMedia('(display-mode: standalone)').matches;
-  if (isStandalone || sessionStorage.getItem(DISMISSED_KEY)) return;
-
-  function hideBanner() {
-    banner.style.display = 'none';
-    sessionStorage.setItem(DISMISSED_KEY, '1');
-  }
-
-  dismissBtn?.addEventListener('click', hideBanner);
-
-  window.addEventListener('appinstalled', () => {
-    banner.style.display = 'none';
-    _deferredPrompt = null;
-  });
-
-  // ── Safari (iOS & macOS) ──────────────────────────────────────
-  // Safari never fires beforeinstallprompt — detect it and show
-  // manual "Add to Home Screen" instructions instead.
-  const isIOS    = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isSafari = isIOS || /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-  if (isSafari) {
-    const subtext = banner.querySelector('.pwa-banner-text span');
-    if (subtext) {
-      subtext.innerHTML = isIOS
-        ? 'Tap the <strong>Share &#x2191;</strong> button, then <strong>"Add to Home Screen"</strong>'
-        : 'In Safari: <strong>File</strong> &rarr; <strong>"Add to Dock&hellip;"</strong>';
-    }
-    if (installBtn) {
-      installBtn.textContent = 'Got it';
-      installBtn.addEventListener('click', hideBanner);
-    }
-    banner.style.display = 'flex';
-    return;
-  }
-
-  // ── Chrome / Android — wait for the native install prompt ─────
-  window.addEventListener('beforeinstallprompt', e => {
-    e.preventDefault();
-    _deferredPrompt = e;
-    banner.style.display = 'flex';
-  });
-
-  installBtn?.addEventListener('click', async () => {
-    if (!_deferredPrompt) return;
-    _deferredPrompt.prompt();
-    const { outcome } = await _deferredPrompt.userChoice;
-    _deferredPrompt = null;
-    banner.style.display = 'none';
-    if (outcome === 'accepted') sessionStorage.setItem(DISMISSED_KEY, '1');
-  });
-})();

@@ -108,44 +108,27 @@ body {
 .sidebar-user {
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-}
-
-.user-avatar {
-  width: 39px;
-  height: 39px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
-  align-items: center;
-  justify-content: center;
-  font-size: 0.72rem;
-  font-weight: 700;
-  flex-shrink: 0;
-  overflow: hidden;
-  display: flex;
-}
-
-#user-avatar-mobile-view {
-  display: none !important;
-}
-
-.user-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  min-width: 0;
 }
 
 .user-info {
   min-width: 0;
 }
 
-.user-name-display {
-  font-size: 0.84rem;
-  font-weight: 600;
+.user-label {
   display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-dim);
+  margin-bottom: 3px;
+}
+
+.user-email-display {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -583,118 +566,6 @@ body {
   margin-bottom: 20px;
 }
 
-/* ── Profile ─────────────────────────────────────────────── */
-.profile-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 290px) minmax(0, 1fr);
-  gap: 24px;
-}
-
-#profile-avatar-display {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.5rem;
-  font-weight: 800;
-  margin: 0 auto 16px;
-  overflow: hidden;
-}
-
-#profile-avatar-display img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.profile-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 18px;
-}
-
-/* Counts are one or two characters; the money figure gets the whole row so a
-   nine- or ten-digit total reads at full size instead of being squeezed. */
-.profile-stats .profile-stat:last-child {
-  grid-column: 1 / -1;
-}
-
-.profile-stat {
-  text-align: center;
-  background: var(--bg-card2);
-  border-radius: 10px;
-  padding: 12px 6px;
-  min-width: 0;   /* let a long figure clip rather than widen the grid */
-}
-
-.profile-stat-value {
-  font-size: 1.3rem;
-  font-weight: 800;
-  color: var(--primary);
-  line-height: 1.15;
-  overflow-wrap: anywhere;
-}
-
-/* Past ten digits the figure is clipped to a single line and marked as
-   openable; tapping it lets the whole number wrap into view. */
-.profile-stat-value.is-long {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  font-size: 1.05rem;
-  border-bottom: 1px dashed var(--border-md);
-  transition: font-size 0.22s var(--ease-out), color 0.18s ease;
-}
-
-.profile-stat-value.is-long:hover {
-  color: var(--text);
-}
-
-.profile-stat-value.is-long:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 3px;
-  border-radius: 4px;
-}
-
-.profile-stat-value.is-long.expanded {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: clip;
-  overflow-wrap: anywhere;
-  font-size: 0.92rem;
-  border-bottom-color: transparent;
-}
-
-.profile-stat-label {
-  font-size: 0.68rem;
-  color: var(--text-muted);
-  margin-top: 2px;
-}
-
-.danger-zone {
-  border: 1px solid rgba(244, 67, 54, 0.22);
-  border-radius: var(--radius-lg);
-  padding: 18px;
-  margin-top: 18px;
-}
-
-.danger-zone h3 {
-  color: var(--danger);
-  font-size: 0.92rem;
-  margin-bottom: 6px;
-}
-
-.danger-zone p {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-}
-
 /* ── Form Elements ───────────────────────────────────────── */
 .form-group {
   margin-bottom: 14px;
@@ -1101,124 +972,9 @@ select.input {
   }
 }
 
-/* ── Crop Modal ──────────────────────────────────────────── */
-.crop-wrap {
-  position: relative;
-  user-select: none;
-  touch-action: none;
-  overflow: hidden;
-  background: #000;
-  border-radius: var(--radius);
-  max-height: 370px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.crop-wrap img {
-  display: block;
-  max-width: 100%;
-  max-height: 370px;
-  pointer-events: none;
-}
-
-.crop-box {
-  position: absolute;
-  border: 2px solid var(--primary);
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.52);
-  cursor: move;
-  border-radius: 50%;
-  box-sizing: border-box;
-}
-
-.crop-handle {
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  background: var(--primary);
-  border-radius: 50%;
-  border: 2px solid #fff;
-}
-
-.crop-handle-nw {
-  top: -6px;
-  left: -6px;
-  cursor: nw-resize;
-}
-
-.crop-handle-ne {
-  top: -6px;
-  right: -6px;
-  cursor: ne-resize;
-}
-
-.crop-handle-sw {
-  bottom: -6px;
-  left: -6px;
-  cursor: sw-resize;
-}
-
-.crop-handle-se {
-  bottom: -6px;
-  right: -6px;
-  cursor: se-resize;
-}
-
-.crop-preview-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 4px;
-  padding: 0 2px;
-}
-
-.crop-preview-label {
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-#crop-preview-canvas {
-  border-radius: 50%;
-  border: 2px solid var(--border);
-  display: block;
-}
-
-/* ── Profile Avatar Wrap ─────────────────────────────────── */
-.profile-avatar-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.profile-avatar-wrap #profile-avatar-display {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.6rem;
-  font-weight: 800;
-  border: 2px solid rgba(187, 136, 95, 0.3);
-}
-
-.profile-avatar-wrap #profile-avatar-display img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
 /* ── Responsive ──────────────────────────────────────────── */
 @media (max-width: 1024px) {
   .charts-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .profile-layout {
     grid-template-columns: 1fr;
   }
 
@@ -1244,10 +1000,6 @@ select.input {
 
   .topbar {
     padding: 0 14px;
-  }
-
-  #user-avatar-mobile-view {
-    display: flex !important;
   }
 
   #toast-container {

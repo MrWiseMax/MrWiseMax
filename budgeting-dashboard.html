@@ -29,11 +29,10 @@
     <!-- Sidebar (desktop) -->
     <aside class="sidebar">
 
-      <div class="sidebar-user" onclick="navigateTo('profile')">
-        <div class="user-avatar"></div>
+      <div class="sidebar-user">
         <div class="user-info">
-          <span class="user-name-display">Loading…</span>
-          <span class="user-username-display" style="font-size:0.75rem;color:var(--text-dim)"></span>
+          <span class="user-label">Signed in as</span>
+          <span class="user-email-display">…</span>
         </div>
       </div>
 
@@ -47,7 +46,6 @@
       </nav>
 
       <div class="sidebar-bottom">
-        <button class="nav-item" data-nav="profile"><span class="nav-icon">👤</span> Profile</button>
         <button class="nav-item" onclick="openCurrencySettingsModal()"><span class="nav-icon">💱</span>
           Currency</button>
         <button class="nav-item" id="signout-btn"><span class="nav-icon">🚪</span> Sign Out</button>
@@ -59,8 +57,6 @@
       <!-- Topbar -->
       <header class="topbar">
         <div style="display:flex;align-items:center;gap:15px">
-          <div id="user-avatar-mobile-view" class="user-avatar" style="cursor:pointer" data-nav="profile"
-            onclick="navigateTo('profile')" title="Profile"></div>
           <button class="settings-gear-mobile" onclick="openCurrencySettingsModal()" title="Currency"
             aria-label="Currency">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
@@ -262,91 +258,12 @@
           </div>
         </section>
 
-        <!-- ═══════════════════════════════════════
-           SECTION: PROFILE
-      ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-profile">
-          <h1 class="section-title">Your Profile</h1>
-          <p class="section-subtitle">Manage your account and public presence.</p>
-
-          <div class="profile-layout">
-            <!-- Left: Avatar + Stats -->
-            <div class="card" style="text-align:center">
-              <div class="profile-avatar-wrap">
-                <div id="profile-avatar-display"></div>
-                <button class="btn btn-sm btn-outline" id="profile-avatar-upload-btn" style="margin-top:10px">Change
-                  Photo</button>
-                <input type="file" id="profile-avatar-file" accept="image/jpeg,image/png,image/webp,image/gif"
-                  style="display:none" aria-hidden="true">
-              </div>
-              <div id="profile-email"
-                style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px;margin-top:8px"></div>
-              <div class="profile-stats">
-                <div class="profile-stat">
-                  <div class="profile-stat-value" id="profile-stat-expenses">0</div>
-                  <div class="profile-stat-label">Expenses</div>
-                </div>
-                <div class="profile-stat">
-                  <div class="profile-stat-value" id="profile-stat-groups">0</div>
-                  <div class="profile-stat-label">Groups</div>
-                </div>
-                <div class="profile-stat">
-                  <div class="profile-stat-value" id="profile-stat-monthly">0</div>
-                  <div class="profile-stat-label">Per month</div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Right: Edit Form -->
-            <div>
-              <div class="card" style="margin-bottom:16px">
-                <div class="card-title">Edit Profile</div>
-                <div class="form-group">
-                  <label class="label" style="justify-content:space-between">
-                    Username
-                    <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400;text-transform:none">3–30 chars
-                      · lowercase · once every 30 days</span>
-                  </label>
-                  <input type="text" class="input" id="profile-username-input" placeholder="your-username"
-                    maxlength="30" autocapitalize="off" autocorrect="off" spellcheck="false">
-                </div>
-                <div class="form-group">
-                  <label class="label" style="justify-content:space-between">
-                    Display Name
-                    <span style="font-size:0.7rem;color:var(--text-dim);font-weight:400;text-transform:none">Max 50
-                      · twice every 14 days</span>
-                  </label>
-                  <input type="text" class="input" id="profile-nickname-input" placeholder="e.g. Alex Johnson"
-                    maxlength="50">
-                </div>
-                <div class="form-group">
-                  <label class="label">Bio (optional)</label>
-                  <textarea class="input" id="profile-bio-input" placeholder="A short bio…" rows="3"
-                    style="resize:vertical"></textarea>
-                </div>
-                <button class="btn btn-primary" onclick="saveProfile()">Save Changes</button>
-              </div>
-
-              <div class="danger-zone">
-                <h3>⚠️ Danger Zone</h3>
-                <p>Sign out of your account on this device.</p>
-                <button class="btn btn-danger" id="signout-btn-profile"
-                  onclick="UI.confirm('Sign out of MrWiseMax?', () => Auth.signOut(), false)">Sign Out</button>
-              </div>
-            </div>
-          </div>
-
-        </section>
-
       </main><!-- /.dash-content -->
     </div><!-- /.dash-main -->
   </div><!-- /.dash-layout -->
 
   <!-- ── Others Popup (sits above mobile nav) ───────────────────── -->
   <div class="mobile-more-popup" id="mobile-more-popup">
-    <button class="mobile-more-item" onclick="mobileMoreNav('profile')">
-      <span class="mobile-more-icon">👤</span>Profile
-    </button>
     <button class="mobile-more-item" onclick="mobileMoreNav('education')">
       <span class="mobile-more-icon">🎓</span>Education
     </button>
@@ -375,33 +292,6 @@
      MODALS
 ════════════════════════════════════════════ -->
 
-  <!-- Crop Avatar Modal -->
-  <div class="modal" id="crop-modal">
-    <div class="modal-box" style="max-width:480px">
-      <div class="modal-header">
-        <h2>Crop Photo</h2>
-        <button class="modal-close" onclick="UI.closeModal('crop-modal')">✕</button>
-      </div>
-      <div class="crop-wrap" id="crop-wrap">
-        <img id="crop-source-img" alt="crop source">
-        <div class="crop-box" id="crop-box">
-          <div class="crop-handle crop-handle-nw" data-dir="nw"></div>
-          <div class="crop-handle crop-handle-ne" data-dir="ne"></div>
-          <div class="crop-handle crop-handle-sw" data-dir="sw"></div>
-          <div class="crop-handle crop-handle-se" data-dir="se"></div>
-        </div>
-      </div>
-      <div class="crop-preview-row">
-        <span class="crop-preview-label">Preview</span>
-        <canvas id="crop-preview-canvas" width="56" height="56"></canvas>
-      </div>
-      <canvas id="crop-canvas" style="display:none"></canvas>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="UI.closeModal('crop-modal')">Cancel</button>
-        <button class="btn btn-primary" onclick="confirmCrop()">Apply &amp; Upload</button>
-      </div>
-    </div>
-  </div>
 
   <!-- Confirm Dialog -->
   <div class="modal" id="confirm-modal">

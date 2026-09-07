@@ -845,12 +845,9 @@ function coverageByGroup(c) {
 }
 
 function groupVerdict(b) {
-  if (b.status === 'covered') {
-    return `All ${b.count} ${b.count === 1 ? 'charge' : 'charges'} covered`;
-  }
-  if (b.status === 'uncovered') {
-    return `None covered · ${UI.currency(b.shortfall)} short`;
-  }
+  // The charges are listed right underneath, so the count adds nothing here.
+  if (b.status === 'covered')   return 'All covered';
+  if (b.status === 'uncovered') return `None covered · ${UI.currency(b.shortfall)} short`;
   return `${b.coveredCount} of ${b.count} covered · ${UI.currency(b.shortfall)} short`;
 }
 

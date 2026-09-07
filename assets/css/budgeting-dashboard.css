@@ -368,13 +368,52 @@ body {
   }
 }
 
-@media (max-width: 560px) {
-  .balance-account {
-    grid-template-columns: minmax(0, 1fr) auto auto;
+@media (max-width: 640px) {
+  .balance-label {
+    margin-bottom: 5px;
   }
 
-  .balance-account .balance-account-name {
-    grid-column: 1 / -1;
+  .balance-value {
+    font-size: 1.7rem;
+  }
+
+  .balance-meta {
+    font-size: 0.72rem;
+    margin-top: 5px;
+  }
+
+  /* The heading and the explainer both restate what the fields plainly show. */
+  .balance-form-label,
+  .balance-hint {
+    display: none;
+  }
+
+  .balance-accounts {
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .balance-account {
+    gap: 5px;
+  }
+
+  .balance-account .input {
+    padding: 7px 9px;
+    font-size: 0.78rem;
+  }
+
+  .balance-account .icon-btn {
+    width: 26px;
+    height: 26px;
+  }
+
+  .balance-account-meta {
+    font-size: 0.63rem;
+    margin-top: -3px;
+  }
+
+  .balance-add-btn {
+    margin-top: 7px;
   }
 }
 
@@ -2037,29 +2076,65 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 /* ── Small screens ───────────────────────────────────────── */
 @media (max-width: 640px) {
+  /* Name and amount share the top line, the date sits under the name. Left to
+     auto-placement a spanning cell pushes the amount onto a third row, which
+     is what made every entry three lines tall. */
   .cov-row {
     grid-template-columns: 8px minmax(0, 1fr) auto;
-    gap: 8px 10px;
+    gap: 2px 9px;
+    padding: 7px 0;
+  }
+
+  .cov-dot   { grid-area: 1 / 1; }
+  .cov-name  { grid-area: 1 / 2; }
+  .cov-amt   { grid-area: 1 / 3; }
+
+  .cov-when {
+    grid-area: 2 / 2 / 2 / -1;
+    font-size: 0.68rem;
   }
 
   .cov-group-head {
     grid-template-columns: 9px minmax(0, 1fr) auto;
-    gap: 4px 9px;
+    gap: 2px 9px;
   }
 
+  .cov-group-dot     { grid-area: 1 / 1; }
+  .cov-group-name    { grid-area: 1 / 2; }
+  .cov-group-total   { grid-area: 1 / 3; }
+
   .cov-group-verdict {
-    grid-column: 2 / -1;
+    grid-area: 2 / 2 / 2 / -1;
     white-space: normal;
+  }
+
+  .cov-group {
+    padding-top: 9px;
+    margin-top: 9px;
   }
 
   .cov-group-items {
     padding-left: 10px;
   }
 
-  .cov-when {
-    grid-column: 2 / -1;
-    margin-top: -4px;
+  /* Three figures across one row rather than two-and-a-stray. */
+  .coverage-figures {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px 12px;
+    margin: 12px 0 2px;
   }
+
+  .cov-fig span   { font-size: 0.58rem; letter-spacing: 0.04em; }
+
+  .cov-fig strong {
+    font-size: 0.84rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .coverage-sub { font-size: 0.75rem; }
 
   .cost-totals { gap: 18px; }
 

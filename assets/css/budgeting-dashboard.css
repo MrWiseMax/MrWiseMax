@@ -977,6 +977,7 @@ select.input {
 .modal {
   position: fixed;
   inset: 0;
+  cursor: pointer;   /* the backdrop dismisses */
   z-index: 500;
   background: rgba(0, 0, 0, 0.65);
   backdrop-filter: blur(4px);
@@ -990,11 +991,40 @@ select.input {
   display: flex;
 }
 
+/* Held open for the length of the fade, then dropped. */
+.modal.modal-closing {
+  display: flex;
+  pointer-events: none;
+  animation: modalBackdropOut 0.22s ease forwards;
+}
+
+.modal.modal-closing .modal-box {
+  animation: modalOut 0.22s ease forwards;
+}
+
+@keyframes modalBackdropOut {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@keyframes modalOut {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+
 #confirm-modal {
   z-index: 600;
 }
 
 .modal-box {
+  cursor: auto;
   background: var(--bg-card);
   border: 1px solid var(--border-md);
   border-radius: var(--radius-lg);
@@ -3225,7 +3255,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .dash-section[data-fresh] .group-card,
 .dash-section[data-fresh] .exp-row,
-.dash-section[data-fresh] .cov-row,
+.dash-section[data-fresh] .cov-group,
 .dash-section[data-fresh] .cost-group {
   animation: rise 0.36s var(--ease-out) both;
   animation-delay: min(calc(var(--i, 0) * 26ms), 400ms);
@@ -3235,8 +3265,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .dash-section[data-fresh] > *,
   .dash-section[data-fresh] .group-card,
   .dash-section[data-fresh] .exp-row,
-  .dash-section[data-fresh] .cov-row,
+  .dash-section[data-fresh] .cov-group,
   .dash-section[data-fresh] .cost-group {
+    animation: none;
+  }
+
+  .modal.modal-closing,
+  .modal.modal-closing .modal-box,
+  .modal-box {
     animation: none;
   }
 
@@ -3398,20 +3434,65 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   margin-top: 8px;
 }
 
-.cov-head {
-  font-size: 0.66rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.09em;
-  color: var(--text-dim);
-  margin: 16px 0 2px;
-  padding-top: 10px;
+.cov-group {
   border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 12px;
 }
 
-.cov-head.uncovered { color: var(--danger); }
-.cov-head.partial   { color: var(--warning); }
-.cov-head.covered   { color: var(--success); }
+.cov-group:first-child {
+  border-top: none;
+  margin-top: 4px;
+}
+
+.cov-group-head {
+  display: grid;
+  grid-template-columns: 9px minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.cov-group-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: var(--chip, var(--primary));
+}
+
+.cov-group-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cov-group-verdict {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cov-group.covered   .cov-group-verdict { color: var(--success); }
+.cov-group.partial   .cov-group-verdict { color: var(--warning); }
+.cov-group.uncovered .cov-group-verdict { color: var(--danger); }
+
+.cov-group-total {
+  font-size: 0.88rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.cov-group-items {
+  padding-left: 18px;
+  margin-top: 2px;
+}
 
 .cov-row {
   display: grid;
@@ -3612,19 +3693,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   padding: 9px 12px;
   font-size: 0.82rem;
 }
-
-.expense-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.expense-check input { accent-color: var(--primary); cursor: pointer; }
 
 /* ── Group card ──────────────────────────────────────────── */
 .group-card {
@@ -3888,6 +3956,20 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .cov-row {
     grid-template-columns: 8px minmax(0, 1fr) auto;
     gap: 8px 10px;
+  }
+
+  .cov-group-head {
+    grid-template-columns: 9px minmax(0, 1fr) auto;
+    gap: 4px 9px;
+  }
+
+  .cov-group-verdict {
+    grid-column: 2 / -1;
+    white-space: normal;
+  }
+
+  .cov-group-items {
+    padding-left: 10px;
   }
 
   .cov-when {

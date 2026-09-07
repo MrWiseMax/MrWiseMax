@@ -16,7 +16,7 @@ const App = {
   likedBlueprintIds: new Set(),
   activeSection: 'overview',
   coverageWindow: 30,
-  expenseFilters: { search: '', sort: 'due', showPaused: false },
+  expenseFilters: { search: '', sort: 'due' },
   editing: { expense: null, group: null },
   communitySearch: '',
 };
@@ -784,38 +784,86 @@ function renderCoverage() {
       </div>`;
   }
 
-  // Uncovered first: that is the part that needs a decision.
-  const rows = [...c.per.values()].map(r => ({
-    ...r,
-    status: r.covered === 0 ? 'uncovered' : r.covered < r.count ? 'partial' : 'covered',
-  })).sort((a, b) => {
-    const rank = { uncovered: 0, partial: 1, covered: 2 };
-    return rank[a.status] - rank[b.status] || a.first - b.first;
-  });
-
-  if (!rows.length) {
+  const groups = coverageByGroup(c);
+  if (!groups.length) {
     list.innerHTML = `<p class="cov-empty">Nothing charges in the next ${c.days} days.</p>`;
     return;
   }
 
-  const label = { uncovered: "Can't cover", partial: 'Partly covered', covered: 'Covered' };
-  let last = null;
-  list.innerHTML = rows.map((r, i) => {
-    const head = r.status !== last
-      ? `<div class="cov-head ${r.status}">${label[r.status]}</div>` : '';
-    last = r.status;
-    const g = groupOf(r.e);
-    return head + `
-      <div class="cov-row ${r.status}" style="--i:${i}">
-        <span class="cov-dot"></span>
-        <div class="cov-name">
-          <span class="cov-title">${esc(r.e.name)}</span>
-          ${g ? `<span class="chip" style="--chip:${g.color}">${g.icon ? esc(g.icon) + ' ' : ''}${esc(g.name)}</span>` : ''}
-        </div>
-        <div class="cov-when">${UI.formatDate(isoDay(r.first))}${r.count > 1 ? ` · ${r.count}×` : ''}</div>
-        <div class="cov-amt">${UI.currency(r.total)}</div>
-      </div>`;
-  }).join('');
+  list.innerHTML = groups.map((b, gi) => `
+    <div class="cov-group ${b.status}" style="--chip:${b.color};--i:${gi}">
+      <div class="cov-group-head">
+        <span class="cov-group-dot"></span>
+        <span class="cov-group-name">${esc(b.label)}</span>
+        <span class="cov-group-verdict">${groupVerdict(b)}</span>
+        <span class="cov-group-total">${UI.currency(b.total)}</span>
+      </div>
+      <div class="cov-group-items">
+        ${b.items.map(it => `
+          <div class="cov-row ${it.status}">
+            <span class="cov-dot"></span>
+            <div class="cov-name"><span class="cov-title">${esc(it.e.name)}</span></div>
+            <div class="cov-when">${UI.formatDate(isoDay(it.first))}${it.count > 1 ? ` · ${it.count}×` : ''}</div>
+            <div class="cov-amt">${UI.currency(it.total)}</div>
+          </div>`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+// Rolls the walk up per group, so each one answers "can the balance cover this
+// whole group?" — and, when it cannot, which of its items miss out. The
+// statuses come from the single shared walk, not from pricing each group in
+// isolation: groups compete for the same money, in date order.
+function coverageByGroup(c) {
+  const buckets = new Map();
+
+  c.charges.forEach(ch => {
+    const gid = ch.e.group_id || null;
+    let b = buckets.get(gid);
+    if (!b) {
+      const g = App.expenseGroups.find(x => x.id === gid) || null;
+      b = {
+        gid,
+        label: g ? (g.icon ? g.icon + ' ' : '') + g.name : 'Ungrouped',
+        color: g ? g.color : '#607D8B',
+        total: 0, covered: 0, count: 0, coveredCount: 0, first: ch.date, items: new Map(),
+      };
+      buckets.set(gid, b);
+    }
+    b.total += ch.amount;
+    b.count++;
+    if (ch.covered) { b.covered += ch.amount; b.coveredCount++; }
+    if (ch.date < b.first) b.first = ch.date;
+
+    let it = b.items.get(ch.id);
+    if (!it) { it = { e: ch.e, total: 0, count: 0, coveredCount: 0, first: ch.date }; b.items.set(ch.id, it); }
+    it.total += ch.amount;
+    it.count++;
+    if (ch.covered) it.coveredCount++;
+    if (ch.date < it.first) it.first = ch.date;
+  });
+
+  const rank = { uncovered: 0, partial: 1, covered: 2 };
+  const statusOf = (done, all) => done === 0 ? 'uncovered' : done < all ? 'partial' : 'covered';
+
+  return [...buckets.values()].map(b => ({
+    ...b,
+    shortfall: b.total - b.covered,
+    status: statusOf(b.coveredCount, b.count),
+    items: [...b.items.values()]
+      .map(it => ({ ...it, status: statusOf(it.coveredCount, it.count) }))
+      .sort((x, y) => rank[x.status] - rank[y.status] || x.first - y.first),
+  })).sort((x, y) => y.shortfall - x.shortfall || x.first - y.first);
+}
+
+function groupVerdict(b) {
+  if (b.status === 'covered') {
+    return `All ${b.count} ${b.count === 1 ? 'charge' : 'charges'} covered`;
+  }
+  if (b.status === 'uncovered') {
+    return `None covered · ${UI.currency(b.shortfall)} short`;
+  }
+  return `${b.coveredCount} of ${b.count} covered · ${UI.currency(b.shortfall)} short`;
 }
 
 function renderCostSummary() {
@@ -920,9 +968,11 @@ function renderExpenses() {
   renderExpenseGroups();
 }
 
+// Everything is listed, paused included — a paused row is dimmed and badged
+// rather than hidden, so nothing can quietly disappear from the picture.
 function visibleExpenses() {
-  const { search, sort, showPaused } = App.expenseFilters;
-  let list = (App.expenses || []).filter(e => showPaused || e.is_active);
+  const { search, sort } = App.expenseFilters;
+  let list = [...(App.expenses || [])];
   if (search) {
     const q = search.toLowerCase();
     list = list.filter(e => e.name.toLowerCase().includes(q) ||
@@ -1324,12 +1374,6 @@ function setupExpenseControls() {
   const sort = document.getElementById('expense-sort');
   if (sort) sort.addEventListener('change', () => {
     App.expenseFilters.sort = sort.value;
-    renderExpenseGroups();
-  });
-
-  const paused = document.getElementById('expense-show-paused');
-  if (paused) paused.addEventListener('change', () => {
-    App.expenseFilters.showPaused = paused.checked;
     renderExpenseGroups();
   });
 

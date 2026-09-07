@@ -27,27 +27,59 @@ const UI = (() => {
   }
 
   // ── Modal System ─────────────────────────────────────────
+  // Closing runs through a short `modal-closing` state so the box can fade
+  // out; `modal-open` still comes off immediately, which is what NavHistory
+  // and the scroll lock watch.
+  const MODAL_FADE_MS = 220;
+
   function openModal(id) {
     const modal = document.getElementById(id);
     if (!modal) return;
+    clearTimeout(modal._closeTimer);
+    modal.classList.remove('modal-closing');
     modal.classList.add('modal-open');
     document.body.style.overflow = 'hidden';
   }
 
   function closeModal(id) {
     const modal = document.getElementById(id);
-    if (!modal) return;
+    if (!modal || !modal.classList.contains('modal-open')) return;
     modal.classList.remove('modal-open');
-    document.body.style.overflow = '';
+    modal.classList.add('modal-closing');
+    clearTimeout(modal._closeTimer);
+    modal._closeTimer = setTimeout(() => modal.classList.remove('modal-closing'), MODAL_FADE_MS);
+    releaseScrollLock();
   }
 
   function closeAllModals() {
-    document.querySelectorAll('.modal.modal-open').forEach(m => m.classList.remove('modal-open'));
-    document.body.style.overflow = '';
+    document.querySelectorAll('.modal.modal-open').forEach(m => closeModal(m.id));
+    releaseScrollLock();
   }
 
-  // Backdrop clicks intentionally do NOT close modals —
-  // users must use the ✕ button or press Escape.
+  // Only give the page its scrollbar back once nothing is still open —
+  // the confirm dialog stacks on top of other modals.
+  function releaseScrollLock() {
+    if (!document.querySelector('.modal.modal-open')) document.body.style.overflow = '';
+  }
+
+  // ── Dismissing a modal ───────────────────────────────────
+  // A click closes only when the press *and* the release both landed on the
+  // backdrop, so dragging from inside the box and letting go outside it —
+  // selecting text, or moving the avatar crop box — never dismisses.
+  let pressedOn = null;
+  document.addEventListener('pointerdown', e => { pressedOn = e.target; }, true);
+
+  document.addEventListener('click', e => {
+    const modal = e.target.closest?.('.modal.modal-open');
+    if (!modal || e.target !== modal || pressedOn !== modal) return;
+    closeModal(modal.id);
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    const open = [...document.querySelectorAll('.modal.modal-open')].pop();
+    if (open) closeModal(open.id);
+  });
 
   // ── Confirm Dialog ───────────────────────────────────────
   function confirm(message, onConfirm, danger = true) {

@@ -1436,6 +1436,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .seg {
   display: inline-flex;
+  flex-wrap: wrap;
   padding: 3px;
   gap: 2px;
   background: rgba(255, 255, 255, 0.04);
@@ -1451,7 +1452,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   font: inherit;
   font-size: 0.72rem;
   font-weight: 600;
-  padding: 5px 12px;
+  white-space: nowrap;
+  padding: 5px 11px;
   border-radius: 100px;
   cursor: pointer;
   transition: background 0.2s var(--ease-out), color 0.2s var(--ease-out);

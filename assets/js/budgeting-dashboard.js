@@ -11,7 +11,7 @@ const App = {
   // Read only, to offer a one-time import of the previous version's entries.
   recurring: [],
   activeSection: 'overview',
-  coverageWindow: 30,
+  coverageMonths: 1,
   expenseFilters: { search: '', sort: 'due' },
   editing: { expense: null, group: null },
 };
@@ -588,6 +588,16 @@ function monthlyCost(e) {
 function dayStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
 function parseDay(s)  { return dayStart(new Date(String(s).slice(0, 10) + 'T00:00:00')); }
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+// Calendar months, so a window from the 31st lands on the last day of a short
+// month rather than spilling into the next one.
+function addMonths(d, n) {
+  const x = new Date(d);
+  const day = x.getDate();
+  x.setDate(1);
+  x.setMonth(x.getMonth() + n);
+  x.setDate(Math.min(day, new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()));
+  return x;
+}
 function isoDay(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -614,14 +624,15 @@ function nextChargeOf(e) {
   return end && d > end ? null : d;
 }
 
-// Every charge this expense makes between today and `days` from now.
-function occurrencesIn(e, days) {
+// Every charge this expense makes between today and `months` from now.
+function occurrencesIn(e, months) {
   const today = dayStart(new Date());
-  const limit = addDays(today, days);
+  const limit = addMonths(today, months);
   const end   = e.ends_on ? parseDay(e.ends_on) : null;
   const out   = [];
   let d = nextChargeOf(e), guard = 0;
-  while (d && d <= limit && guard++ < 500) {
+  // A daily charge over a year is 366 rows; the cap is well clear of that.
+  while (d && d <= limit && guard++ < 800) {
     if (end && d > end) break;
     out.push(d);
     d = stepCharge(d, e);
@@ -635,11 +646,11 @@ function activeExpenses() { return (App.expenses || []).filter(e => e.is_active)
 // Walks the upcoming charges in date order against the stated balance. The
 // first charge the money cannot meet is where it runs out; everything from
 // there on is uncovered.
-function coverage(days = App.coverageWindow) {
+function coverage(months = App.coverageMonths) {
   const balance = balancesTotal();
   const charges = [];
   activeExpenses().forEach(e =>
-    occurrencesIn(e, days).forEach(date =>
+    occurrencesIn(e, months).forEach(date =>
       charges.push({ id: e.id, e, date, amount: Money.toActive(e.amount, e.currency) })));
 
   charges.sort((a, b) => a.date - b.date || a.amount - b.amount || a.e.name.localeCompare(b.e.name));
@@ -656,8 +667,22 @@ function coverage(days = App.coverageWindow) {
 
   const total   = charges.reduce((s, c) => s + c.amount, 0);
   const covered = balance - left;
-  return { days, balance, charges, per, total, covered,
+  return { months, balance, charges, per, total, covered,
            shortfall: Math.max(0, total - covered), left, breakDate };
+}
+
+// "1 month" / "3 months" / "1 year" — how the window is named on the control
+// and beside the figures.
+function windowLabel(months) {
+  if (months % 12 === 0) { const y = months / 12; return `${y} year${y === 1 ? '' : 's'}`; }
+  return `${months} month${months === 1 ? '' : 's'}`;
+}
+
+// The same span inside a sentence: "the next month", "the next 3 months".
+function windowPhrase(months) {
+  if (months === 1)  return 'the next month';
+  if (months === 12) return 'the next year';
+  return `the next ${windowLabel(months)}`;
 }
 
 // ── Data ─────────────────────────────────────────────────────
@@ -730,17 +755,17 @@ function renderCoverage() {
 
   if (sub) {
     sub.textContent = c.total === 0
-      ? `Nothing is due in the next ${c.days} days.`
+      ? `Nothing is due in ${windowPhrase(c.months)}.`
       : c.shortfall > 0
         ? `Your money runs out on ${UI.formatDate(isoDay(c.breakDate))}.`
-        : `Everything due in the next ${c.days} days is covered.`;
+        : `Everything due in ${windowPhrase(c.months)} is covered.`;
     sub.classList.toggle('bad', c.shortfall > 0);
   }
 
   if (fig) {
     fig.innerHTML = `
       <div class="cov-fig"><span>Balance</span><strong>${UI.currency(c.balance)}</strong></div>
-      <div class="cov-fig"><span>Due in ${c.days} days</span><strong>${UI.currency(c.total)}</strong></div>
+      <div class="cov-fig"><span>Due in ${windowLabel(c.months)}</span><strong>${UI.currency(c.total)}</strong></div>
       <div class="cov-fig ${c.shortfall > 0 ? 'bad' : 'good'}">
         <span>${c.shortfall > 0 ? 'Short by' : 'Left over'}</span>
         <strong>${UI.currency(c.shortfall > 0 ? c.shortfall : c.left)}</strong>
@@ -749,7 +774,7 @@ function renderCoverage() {
 
   const groups = coverageByGroup(c);
   if (!groups.length) {
-    list.innerHTML = `<p class="cov-empty">Nothing charges in the next ${c.days} days.</p>`;
+    list.innerHTML = `<p class="cov-empty">Nothing charges in ${windowPhrase(c.months)}.</p>`;
     return;
   }
 
@@ -1343,7 +1368,7 @@ function setupExpenseControls() {
   document.getElementById('coverage-window')?.addEventListener('click', e => {
     const btn = e.target.closest('.seg-btn');
     if (!btn) return;
-    App.coverageWindow = +btn.dataset.days;
+    App.coverageMonths = +btn.dataset.months;
     document.querySelectorAll('#coverage-window .seg-btn')
       .forEach(b => b.classList.toggle('active', b === btn));
     renderCoverage();

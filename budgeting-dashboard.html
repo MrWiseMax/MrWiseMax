@@ -37,18 +37,14 @@
       </div>
 
       <nav class="sidebar-nav">
-        <div class="nav-section-label">Finance</div>
         <button class="nav-item active" data-nav="overview"><span class="nav-icon">📊</span> Overview</button>
         <button class="nav-item" data-nav="expenses"><span class="nav-icon">🧾</span> Expenses</button>
-
-        <div class="nav-section-label" style="margin-top:8px">Learn</div>
-        <button class="nav-item" data-nav="education"><span class="nav-icon">🎓</span> Education</button>
       </nav>
 
       <div class="sidebar-bottom">
         <button class="nav-item" onclick="openCurrencySettingsModal()"><span class="nav-icon">💱</span>
           Currency</button>
-        <button class="nav-item" id="signout-btn"><span class="nav-icon">🚪</span> Sign Out</button>
+        <button class="nav-item js-signout"><span class="nav-icon">🚪</span> Sign Out</button>
       </div>
     </aside>
 
@@ -169,106 +165,34 @@
         </section>
 
         <!-- ═══════════════════════════════════════
-           SECTION: PLANS
+           SECTION: ACCOUNT — mobile only; the sidebar covers this on desktop
       ═══════════════════════════════════════ -->
+        <section class="dash-section" id="section-account">
+          <h1 class="section-title">Account</h1>
+          <p class="section-subtitle">The account this device is signed in to.</p>
 
-        <!-- ═══════════════════════════════════════
-           SECTION: SIMULATE
-      ═══════════════════════════════════════ -->
-
-        <!-- ═══════════════════════════════════════
-           SECTION: COMPARE
-      ═══════════════════════════════════════ -->
-
-        <!-- ═══════════════════════════════════════
-           SECTION: SAVED
-      ═══════════════════════════════════════ -->
-
-        <!-- ═══════════════════════════════════════
-           SECTION: EDUCATION
-      ═══════════════════════════════════════ -->
-        <section class="dash-section" id="section-education">
-          <h1 class="section-title">Financial Education</h1>
-          <p class="section-subtitle">Tips, concepts, and resources to sharpen your financial knowledge.</p>
-
-          <div class="edu-grid">
-            <div class="edu-card">
-              <div class="edu-icon">📐</div>
-              <h3>The 50/30/20 Rule</h3>
-              <p>Allocate 50% of income to needs, 30% to wants, and 20% to savings and debt. A simple, powerful
-                framework that works for most income levels.</p>
+          <div class="account-card">
+            <div class="account-avatar" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
             </div>
-            <div class="edu-card">
-              <div class="edu-icon">🔥</div>
-              <h3>The FIRE Movement</h3>
-              <p>Financial Independence, Retire Early. Save and invest 40-70% of income aggressively to reach financial
-                independence as soon as possible.</p>
-            </div>
-            <div class="edu-card">
-              <div class="edu-icon">🛡️</div>
-              <h3>Emergency Fund First</h3>
-              <p>Before investing, build 3-6 months of living expenses as a cash emergency fund. This protects you from
-                needing to sell investments at a loss.</p>
-            </div>
-            <div class="edu-card">
-              <div class="edu-icon">📈</div>
-              <h3>Compound Interest</h3>
-              <p>Investing $200/month at 7% annual return becomes ~$240,000 in 30 years. Start early — time is the most
-                powerful financial tool available.</p>
-            </div>
-            <div class="edu-card">
-              <div class="edu-icon">💳</div>
-              <h3>Debt Avalanche Method</h3>
-              <p>Pay minimum on all debts, then throw every extra dollar at the highest-interest debt first.
-                Mathematically the fastest and cheapest way to become debt-free.</p>
-            </div>
-            <div class="edu-card">
-              <div class="edu-icon">🎯</div>
-              <h3>Pay Yourself First</h3>
-              <p>Automate your savings the moment your paycheck arrives. Treat savings like a non-negotiable bill.
-                What's left is yours to spend freely.</p>
-            </div>
-            <div class="edu-card">
-              <div class="edu-icon">🏠</div>
-              <h3>Housing Rule of Thumb</h3>
-              <p>Keep housing costs (rent or mortgage) under 30% of your gross income. Above 30% limits your ability to
-                save, invest, and build wealth.</p>
-            </div>
-            <div class="edu-card">
-              <div class="edu-icon">📊</div>
-              <h3>Net Worth Tracking</h3>
-              <p>Net worth = Assets − Liabilities. Track it monthly. Growing net worth means you're making progress —
-                regardless of your income level.</p>
-            </div>
-            <div class="edu-card">
-              <div class="edu-icon">🌍</div>
-              <h3>Diversification</h3>
-              <p>Never put all savings into one asset, company, or account. Spread investments across different types to
-                reduce risk without sacrificing returns.</p>
+            <div class="account-id">
+              <div class="account-label">Signed in as</div>
+              <div class="account-email user-email-display">…</div>
             </div>
           </div>
 
-          <!-- YouTube -->
-          <div class="yt-embed">
-            <div class="yt-icon">▶</div>
-            <p>Get deeper financial strategy content on our YouTube channel</p>
-            <!-- Replace href with your real YouTube channel URL -->
-            <a href="https://youtube.com" target="_blank" rel="noopener" class="btn btn-primary">
-              Watch MrWiseMax on YouTube
-            </a>
-          </div>
+          <button class="btn btn-danger account-signout js-signout" type="button">
+            <span aria-hidden="true">🚪</span> Sign Out
+          </button>
         </section>
 
       </main><!-- /.dash-content -->
     </div><!-- /.dash-main -->
   </div><!-- /.dash-layout -->
-
-  <!-- ── Others Popup (sits above mobile nav) ───────────────────── -->
-  <div class="mobile-more-popup" id="mobile-more-popup">
-    <button class="mobile-more-item" onclick="mobileMoreNav('education')">
-      <span class="mobile-more-icon">🎓</span>Education
-    </button>
-  </div>
 
   <!-- ── Mobile Bottom Navigation ─────────────────────────────── -->
   <nav class="mobile-nav">
@@ -278,14 +202,14 @@
     <button class="mobile-nav-item" data-nav="expenses">
       <span class="mobile-nav-icon">🧾</span>Expenses
     </button>
-    <button class="mobile-nav-item" id="mobile-others-btn" onclick="toggleMobileMore(event)">
+    <button class="mobile-nav-item" data-nav="account">
       <span class="mobile-nav-icon">
-        <svg width="20" height="15" viewBox="0 0 20 15" fill="currentColor">
-          <rect y="0" width="20" height="2.5" rx="1.25" />
-          <rect y="6.25" width="20" height="2.5" rx="1.25" />
-          <rect y="12.5" width="20" height="2.5" rx="1.25" />
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
         </svg>
-      </span>Others
+      </span>Account
     </button>
   </nav>
 

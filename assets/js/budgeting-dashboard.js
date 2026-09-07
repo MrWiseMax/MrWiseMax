@@ -303,6 +303,9 @@ function setupNavigation() {
 }
 
 function navigateTo(section) {
+  // Account lives on the mobile bar only; on a wide screen the sidebar
+  // already shows the address and the sign-out button.
+  if (section === 'account' && !isNarrow()) section = 'overview';
   App.activeSection = section;
   UI.showSection(section);
 
@@ -321,32 +324,14 @@ function navigateTo(section) {
   const dashContent = document.querySelector('.dash-content');
   if (dashContent) dashContent.scrollTop = 0;
 
-  // Others button lights up for anything not on the bottom bar
-  const othersBtn = document.getElementById('mobile-others-btn');
-  if (othersBtn) othersBtn.classList.toggle('active', section === 'education');
-
-  // Close Others popup whenever we navigate
-  document.getElementById('mobile-more-popup')?.classList.remove('open');
-
-  const loaders = { overview: renderOverview, expenses: renderExpenses,
-    education: renderEducation };
+  // Account is a mobile-only page and needs no loader — the address it shows
+  // is filled in once at sign-in.
+  const loaders = { overview: renderOverview, expenses: renderExpenses };
   if (loaders[section]) loaders[section]();
 }
 
-function toggleMobileMore(e) {
-  e.stopPropagation();
-  document.getElementById('mobile-more-popup')?.classList.toggle('open');
-}
-
-function mobileMoreNav(section) {
-  document.getElementById('mobile-more-popup')?.classList.remove('open');
-  navigateTo(section);
-}
-
-// Close Others popup when tapping anywhere else
-document.addEventListener('click', () => {
-  document.getElementById('mobile-more-popup')?.classList.remove('open');
-});
+// True while the mobile bottom bar is the navigation, i.e. the sidebar is hidden.
+function isNarrow() { return window.matchMedia('(max-width: 768px)').matches; }
 
 // ── Dynamic Layout Sizing ─────────────────────────────────────
 // Replaces the static .dash-content::after spacer.
@@ -379,7 +364,7 @@ function _applyLayout() {
   // bottom of dash-content disappears behind the browser toolbar.
   // Pinning dash-layout to the real visual height fixes that.
   const vh       = window.visualViewport?.height ?? window.innerHeight;
-  const isMobile = window.matchMedia('(max-width: 768px)').matches;
+  const isMobile = isNarrow();
   const navH     = isMobile && mobileNav ? mobileNav.offsetHeight : 0;
   const topbarH  = topbar ? topbar.offsetHeight : 0;
   const availH   = Math.floor(vh - topbarH - navH);       // px available for sections
@@ -399,6 +384,9 @@ function _applyLayout() {
     s.style.minHeight = `${availH}px`;
   });
 
+  // Widening past the mobile breakpoint hides the Account page with it, so
+  // move off it rather than leaving a blank pane behind.
+  if (!isMobile && App.activeSection === 'account') navigateTo('overview');
 }
 
 // ── Data Loaders ─────────────────────────────────────────────
@@ -1372,9 +1360,6 @@ function setupExpenseControls() {
   });
 }
 
-// ── EDUCATION ─────────────────────────────────────────────────
-function renderEducation() {} // Static content in HTML
-
 // ── HELPERS ───────────────────────────────────────────────────
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
 
@@ -1534,8 +1519,11 @@ function selectCurrency(code) {
 
 // ── SIGN OUT ─────────────────────────────────────────────────
 function setupSignOut() {
-  document.getElementById('signout-btn')?.addEventListener('click', () => {
-    UI.confirm('Sign out of MrWiseMax?', () => Auth.signOut(), false);
+  // One in the desktop sidebar, one on the mobile Account page.
+  document.querySelectorAll('.js-signout').forEach(btn => {
+    btn.addEventListener('click', () => {
+      UI.confirm('Sign out of MrWiseMax?', () => Auth.signOut(), false);
+    });
   });
 }
 

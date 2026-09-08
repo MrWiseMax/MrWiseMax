@@ -17,6 +17,10 @@ const App = {
   // a re-render of the page you are already looking at.
   shownSection: null,
   coverageMonths: 1,
+  // Coverage groups start shut and are opened one at a time. Kept by group id
+  // rather than by position, so a group stays open across a re-render when the
+  // window or the currency changes underneath it.
+  openCovGroups: new Set(),
   expenseFilters: { search: '', sort: 'due' },
   editing: { expense: null, income: null, group: null },
 };
@@ -827,25 +831,40 @@ function renderCoverage() {
     return;
   }
 
-  list.innerHTML = groups.map((b, gi) => `
-    <div class="cov-group ${b.status}" style="--chip:${b.color};--i:${gi}">
-      <div class="cov-group-head">
+  list.innerHTML = groups.map((b, gi) => {
+    const key  = covGroupKey(b.gid);
+    const open = App.openCovGroups.has(key);
+    return `
+    <div class="cov-group ${b.status}${open ? ' open' : ''}" style="--chip:${b.color};--i:${gi}"
+      data-group="${esc(key)}">
+      <button class="cov-group-head" type="button" aria-expanded="${open}" aria-controls="cov-items-${gi}">
         <span class="cov-group-dot"></span>
         <span class="cov-group-name">${esc(b.label)}</span>
         <span class="cov-group-verdict">${groupVerdict(b)}</span>
         <span class="cov-group-total">${UI.currency(b.total)}</span>
+        <span class="cov-caret" aria-hidden="true">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </span>
+      </button>
+      <div class="cov-group-items" id="cov-items-${gi}">
+        <div class="cov-group-items-inner">
+          ${b.items.map(it => `
+            <div class="cov-row ${it.status}">
+              <span class="cov-dot"></span>
+              <div class="cov-name"><span class="cov-title">${esc(it.e.name)}</span></div>
+              <div class="cov-when">${UI.formatDate(isoDay(it.first))}${it.count > 1 ? ` · ${it.count}×` : ''}</div>
+              <div class="cov-amt">${UI.currency(it.total)}</div>
+            </div>`).join('')}
+        </div>
       </div>
-      <div class="cov-group-items">
-        ${b.items.map(it => `
-          <div class="cov-row ${it.status}">
-            <span class="cov-dot"></span>
-            <div class="cov-name"><span class="cov-title">${esc(it.e.name)}</span></div>
-            <div class="cov-when">${UI.formatDate(isoDay(it.first))}${it.count > 1 ? ` · ${it.count}×` : ''}</div>
-            <div class="cov-amt">${UI.currency(it.total)}</div>
-          </div>`).join('')}
-      </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
+
+// Expenses filed under no group share one bucket, whose id is null; give it a
+// name of its own so it can be remembered like any other.
+function covGroupKey(gid) { return gid || 'ungrouped'; }
 
 // Rolls the walk up per group, so each one answers "can the balance cover this
 // whole group?" — and, when it cannot, which of its items miss out. The
@@ -1620,6 +1639,19 @@ function setupExpenseControls() {
   if (sort) sort.addEventListener('change', () => {
     App.expenseFilters.sort = sort.value;
     renderExpenseGroups();
+  });
+
+  // One listener for the whole list: the rows inside it are replaced on every
+  // re-render, so binding each header would have to be redone each time.
+  document.getElementById('coverage-list')?.addEventListener('click', e => {
+    const head = e.target.closest?.('.cov-group-head');
+    if (!head) return;
+    const group = head.closest('.cov-group');
+    const open  = !group.classList.contains('open');
+    group.classList.toggle('open', open);
+    head.setAttribute('aria-expanded', String(open));
+    if (open) App.openCovGroups.add(group.dataset.group);
+    else      App.openCovGroups.delete(group.dataset.group);
   });
 
   document.getElementById('coverage-window')?.addEventListener('click', e => {

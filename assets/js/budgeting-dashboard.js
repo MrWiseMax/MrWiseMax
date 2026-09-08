@@ -237,6 +237,88 @@ const Fmt = {
   },
 };
 
+// ── Date fields ──────────────────────────────────────────────
+// Every date is stored and read as ISO, exactly as before. Only what the user
+// sees and types changes: day/month/year, the same on every browser, rather
+// than whatever order the visitor's locale happens to put them in.
+const DateField = {
+  // '2026-10-01' -> '01/10/2026'
+  toText(iso) {
+    const m = String(iso || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
+  },
+
+  // '01/10/2026' -> '2026-10-01'. Empty when it is not a date that exists,
+  // so 31/02 is rejected rather than quietly becoming the 3rd of March.
+  toIso(text) {
+    const m = String(text || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) return '';
+    const d = +m[1], mo = +m[2], y = +m[3];
+    if (mo < 1 || mo > 12 || d < 1 || d > new Date(y, mo, 0).getDate()) return '';
+    return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  },
+
+  // Slashes appear as you type, and disappear again as you backspace — no
+  // trailing separator is ever re-added, or deleting would never get past it.
+  live(s) {
+    const n = String(s).replace(/\D/g, '').slice(0, 8);
+    return [n.slice(0, 2), n.slice(2, 4), n.slice(4, 8)].filter(Boolean).join('/');
+  },
+};
+
+// Fills both halves of a date field from an ISO date, or clears it.
+function setDateField(id, iso) {
+  const native = document.getElementById(id);
+  if (!native) return;
+  native.value = iso || '';
+  const text = native.closest('.date-field')?.querySelector('.date-text');
+  if (!text) return;
+  text.value = DateField.toText(iso);
+  text.classList.remove('invalid');
+}
+
+// What the user actually typed — tells "left blank" apart from "typed something
+// that is not a date", which need different messages.
+function dateFieldText(id) {
+  return document.getElementById(id)?.closest('.date-field')
+    ?.querySelector('.date-text')?.value.trim() || '';
+}
+
+// Safe to call again — already-wired fields are skipped.
+function wireDateFields() {
+  document.querySelectorAll('.date-field').forEach(field => {
+    if (field.dataset.wired) return;
+    field.dataset.wired = '1';
+    const text   = field.querySelector('.date-text');
+    const native = field.querySelector('.date-native');
+    if (!text || !native) return;
+
+    text.addEventListener('input', () => {
+      const start  = text.selectionStart;
+      const before = text.value.length;
+      text.value   = DateField.live(text.value);
+      const delta  = text.value.length - before;
+      try { text.setSelectionRange(start + delta, start + delta); } catch (_) {}
+      native.value = DateField.toIso(text.value);
+      // Only complain once a whole date has been typed.
+      const digits = text.value.replace(/\D/g, '').length;
+      text.classList.toggle('invalid', digits === 8 && !native.value);
+    });
+
+    // Picking from the calendar writes back into the text box.
+    native.addEventListener('change', () => {
+      text.value = DateField.toText(native.value);
+      text.classList.remove('invalid');
+    });
+
+    field.querySelector('.date-pick')?.addEventListener('click', () => {
+      // showPicker needs a user gesture, which this click is. Older browsers
+      // that lack it fall back to focusing the native control.
+      try { native.showPicker(); } catch (_) { native.focus(); }
+    });
+  });
+}
+
 // Safe to call again after rendering new inputs — already-wired ones are skipped.
 function initCurrencyInputs() {
   document.querySelectorAll('.fmt-currency').forEach(el => {
@@ -280,6 +362,7 @@ async function initDashboard() {
   await rollForwardDueDates();
 
   initCurrencyInputs();
+  wireDateFields();
   // Enter in either field of an account row saves that row.
   document.getElementById('balance-accounts')?.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return;
@@ -1156,8 +1239,8 @@ function openAddIncome() {
   document.getElementById('inc-custom-wrap').hidden = true;
   // Same starting point as a new expense: the 1st of next month beats today,
   // which would file the payment as already landed.
-  document.getElementById('inc-next-due').value = isoDay(firstOfNextMonth());
-  document.getElementById('inc-ends-on').value = '';
+  setDateField('inc-next-due', isoDay(firstOfNextMonth()));
+  setDateField('inc-ends-on', '');
   document.getElementById('inc-notes').value = '';
   wireCadenceToggle('inc-cadence', 'inc-custom-wrap');
   initCurrencyInputs();
@@ -1174,8 +1257,8 @@ function openEditIncome(id) {
   document.getElementById('inc-cadence').value = r.cadence;
   document.getElementById('inc-custom-days').value = r.custom_days || '';
   document.getElementById('inc-custom-wrap').hidden = r.cadence !== 'custom';
-  document.getElementById('inc-next-due').value = String(r.next_due).slice(0, 10);
-  document.getElementById('inc-ends-on').value = r.ends_on ? String(r.ends_on).slice(0, 10) : '';
+  setDateField('inc-next-due', String(r.next_due).slice(0, 10));
+  setDateField('inc-ends-on', r.ends_on ? String(r.ends_on).slice(0, 10) : '');
   document.getElementById('inc-notes').value = r.notes || '';
   wireCadenceToggle('inc-cadence', 'inc-custom-wrap');
   initCurrencyInputs();
@@ -1193,7 +1276,15 @@ async function saveIncome() {
 
   if (!name)                  { UI.toast('Give it a name — "Job salary", say.', 'error'); return; }
   if (!amount || amount <= 0) { UI.toast('Amount must be more than zero.', 'error'); return; }
-  if (!nextDue)               { UI.toast('Pick the next payment date.', 'error'); return; }
+  if (!nextDue) {
+    UI.toast(dateFieldText('inc-next-due')
+      ? 'That payment date is not a real date — use day/month/year.'
+      : 'Pick the next payment date.', 'error');
+    return;
+  }
+  if (!endsOn && dateFieldText('inc-ends-on')) {
+    UI.toast('That end date is not a real date — use day/month/year.', 'error'); return;
+  }
   if (cadence === 'custom' && !(custom >= 1 && custom <= 3650)) {
     UI.toast('Enter how many days between payments (1–3650).', 'error'); return;
   }
@@ -1436,8 +1527,8 @@ function openAddExpense(groupId) {
   document.getElementById('exp-custom-wrap').hidden = true;
   // Most bills land at the start of a month, and today is almost never the
   // right answer — it would file the charge as already due.
-  document.getElementById('exp-next-due').value = isoDay(firstOfNextMonth());
-  document.getElementById('exp-ends-on').value = '';
+  setDateField('exp-next-due', isoDay(firstOfNextMonth()));
+  setDateField('exp-ends-on', '');
   document.getElementById('exp-notes').value = '';
   populateGroupSelect(groupId || '');
   wireCadenceToggle('exp-cadence', 'exp-custom-wrap');
@@ -1455,8 +1546,8 @@ function openEditExpense(id) {
   document.getElementById('exp-cadence').value = e.cadence;
   document.getElementById('exp-custom-days').value = e.custom_days || '';
   document.getElementById('exp-custom-wrap').hidden = e.cadence !== 'custom';
-  document.getElementById('exp-next-due').value = String(e.next_due).slice(0, 10);
-  document.getElementById('exp-ends-on').value = e.ends_on ? String(e.ends_on).slice(0, 10) : '';
+  setDateField('exp-next-due', String(e.next_due).slice(0, 10));
+  setDateField('exp-ends-on', e.ends_on ? String(e.ends_on).slice(0, 10) : '');
   document.getElementById('exp-notes').value = e.notes || '';
   populateGroupSelect(e.group_id || '');
   wireCadenceToggle('exp-cadence', 'exp-custom-wrap');
@@ -1476,7 +1567,15 @@ async function saveExpense() {
 
   if (!name)                        { UI.toast('Give it a name.', 'error'); return; }
   if (!amount || amount <= 0)       { UI.toast('Amount must be more than zero.', 'error'); return; }
-  if (!nextDue)                     { UI.toast('Pick the next charge date.', 'error'); return; }
+  if (!nextDue) {
+    UI.toast(dateFieldText('exp-next-due')
+      ? 'That charge date is not a real date — use day/month/year.'
+      : 'Pick the next charge date.', 'error');
+    return;
+  }
+  if (!endsOn && dateFieldText('exp-ends-on')) {
+    UI.toast('That end date is not a real date — use day/month/year.', 'error'); return;
+  }
   if (cadence === 'custom' && !(custom >= 1 && custom <= 3650)) {
     UI.toast('Enter how many days between charges (1–3650).', 'error'); return;
   }

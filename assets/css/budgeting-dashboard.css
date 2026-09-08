@@ -581,6 +581,69 @@ body {
   transition: border-color var(--ease);
 }
 
+/* ── Date fields ───────────────────────────────────── */
+/* A native date input renders in the browser's own locale, so someone on a US
+   browser reads the 1st of October as 10/01/2026 no matter what the page says.
+   The box you see and type into is therefore plain text that we format
+   ourselves; the native input stays beside it, invisible, holding the ISO value
+   the rest of the app reads and supplying the calendar. */
+.date-field {
+  position: relative;
+}
+
+.date-field .date-text {
+  padding-right: 40px;
+}
+
+.date-field .date-text.invalid {
+  border-color: var(--danger);
+}
+
+/* Kept in the layout — a picker cannot be opened on a display:none input —
+   but never seen, never tabbed to, never clicked directly. */
+.date-native {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.date-pick {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color var(--ease), background var(--ease);
+}
+
+.date-pick:hover {
+  color: var(--primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.date-pick:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
 .input:focus {
   outline: none;
   border-color: var(--primary);

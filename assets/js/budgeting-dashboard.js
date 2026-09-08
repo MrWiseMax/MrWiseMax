@@ -1154,7 +1154,9 @@ function openAddIncome() {
   document.getElementById('inc-cadence').value = 'monthly';
   document.getElementById('inc-custom-days').value = '';
   document.getElementById('inc-custom-wrap').hidden = true;
-  document.getElementById('inc-next-due').value = isoDay(new Date());
+  // Same starting point as a new expense: the 1st of next month beats today,
+  // which would file the payment as already landed.
+  document.getElementById('inc-next-due').value = isoDay(firstOfNextMonth());
   document.getElementById('inc-ends-on').value = '';
   document.getElementById('inc-notes').value = '';
   wireCadenceToggle('inc-cadence', 'inc-custom-wrap');

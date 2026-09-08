@@ -612,6 +612,11 @@ function addMonths(d, n) {
   x.setDate(Math.min(day, new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()));
   return x;
 }
+// The 1st of next month. December rolls into January on its own, because a
+// month index of 12 is January of the following year.
+function firstOfNextMonth(from = new Date()) {
+  return new Date(from.getFullYear(), from.getMonth() + 1, 1);
+}
 function isoDay(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -1427,7 +1432,9 @@ function openAddExpense(groupId) {
   document.getElementById('exp-cadence').value = 'monthly';
   document.getElementById('exp-custom-days').value = '';
   document.getElementById('exp-custom-wrap').hidden = true;
-  document.getElementById('exp-next-due').value = isoDay(new Date());
+  // Most bills land at the start of a month, and today is almost never the
+  // right answer — it would file the charge as already due.
+  document.getElementById('exp-next-due').value = isoDay(firstOfNextMonth());
   document.getElementById('exp-ends-on').value = '';
   document.getElementById('exp-notes').value = '';
   populateGroupSelect(groupId || '');

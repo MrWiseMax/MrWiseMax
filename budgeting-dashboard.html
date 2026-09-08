@@ -38,6 +38,7 @@
 
       <nav class="sidebar-nav">
         <button class="nav-item active" data-nav="overview"><span class="nav-icon">📊</span> Overview</button>
+        <button class="nav-item" data-nav="income"><span class="nav-icon">💰</span> Income</button>
         <button class="nav-item" data-nav="expenses"><span class="nav-icon">🧾</span> Expenses</button>
       </nav>
 
@@ -94,7 +95,7 @@
               <button class="btn btn-ghost btn-sm balance-add-btn" type="button"
                 onclick="addBalanceAccountRow()">+ Add account</button>
               <div class="balance-hint">Enter what each account holds now; the app checks your
-                upcoming charges against the total.</div>
+                upcoming charges against the total, and adds your income as it lands.</div>
             </div>
           </div>
 
@@ -130,6 +131,29 @@
               <div id="attention-list"></div>
             </div>
           </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════
+           SECTION: INCOME
+      ═══════════════════════════════════════ -->
+        <section class="dash-section" id="section-income">
+          <div class="expenses-head">
+            <div>
+              <h1 class="section-title" style="margin-bottom:2px">Income</h1>
+              <p class="section-subtitle" style="margin:0">What comes in, and when &mdash; a salary, and
+                anything else you can count on.</p>
+            </div>
+            <div class="expenses-actions">
+              <button class="btn btn-primary btn-sm" onclick="openAddIncome()">+ Add income</button>
+            </div>
+          </div>
+
+          <div class="card stagger" id="income-total-card" hidden>
+            <div class="card-title">What you bring in</div>
+            <div id="income-totals"></div>
+          </div>
+
+          <div id="income-list"></div>
         </section>
 
         <!-- ═══════════════════════════════════════
@@ -197,6 +221,9 @@
   <nav class="mobile-nav">
     <button class="mobile-nav-item active" data-nav="overview">
       <span class="mobile-nav-icon">📊</span>Overview
+    </button>
+    <button class="mobile-nav-item" data-nav="income">
+      <span class="mobile-nav-icon">💰</span>Income
     </button>
     <button class="mobile-nav-item" data-nav="expenses">
       <span class="mobile-nav-icon">🧾</span>Expenses
@@ -291,6 +318,60 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="UI.closeModal('expense-modal')">Cancel</button>
         <button class="btn btn-primary" id="exp-save-btn" onclick="saveExpense()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Income Modal -->
+  <div class="modal" id="income-modal">
+    <div class="modal-box" style="max-width:480px">
+      <div class="modal-header">
+        <h2 id="income-modal-title">Add Income</h2>
+        <button class="modal-close" onclick="UI.closeModal('income-modal')">✕</button>
+      </div>
+      <div class="form-group">
+        <label class="label">Name *</label>
+        <input type="text" class="input" id="inc-name" maxlength="60"
+          placeholder="e.g. Job salary, Client retainer" autocomplete="off">
+      </div>
+      <div class="input-row">
+        <div class="form-group">
+          <label class="label" id="lbl-inc-amount">Amount ($) *</label>
+          <input type="text" inputmode="decimal" class="input fmt-currency" id="inc-amount" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="label">Paid *</label>
+          <select class="input" id="inc-cadence">
+            <option value="daily">Every day</option>
+            <option value="weekly">Every week</option>
+            <option value="monthly" selected>Every month</option>
+            <option value="yearly">Every year</option>
+            <option value="custom">Custom days…</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" id="inc-custom-wrap" hidden>
+        <label class="label">Every how many days? *</label>
+        <input type="number" min="1" max="3650" class="input" id="inc-custom-days" placeholder="e.g. 14">
+      </div>
+      <div class="input-row">
+        <div class="form-group">
+          <label class="label">Next payment *</label>
+          <input type="date" class="input" id="inc-next-due">
+        </div>
+        <div class="form-group">
+          <label class="label">Ends on <span class="label-hint">optional</span></label>
+          <input type="date" class="input" id="inc-ends-on">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="label">Note <span class="label-hint">optional</span></label>
+        <input type="text" class="input" id="inc-notes" maxlength="500"
+          placeholder="e.g. after tax, paid on the 25th">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="UI.closeModal('income-modal')">Cancel</button>
+        <button class="btn btn-primary" id="inc-save-btn" onclick="saveIncome()">Save</button>
       </div>
     </div>
   </div>

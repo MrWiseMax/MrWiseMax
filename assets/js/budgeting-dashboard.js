@@ -7,6 +7,7 @@ const App = {
   user: null,
   balances: [],
   expenses: [],
+  incomes: [],
   expenseGroups: [],
   // Read only, to offer a one-time import of the previous version's entries.
   recurring: [],
@@ -17,7 +18,7 @@ const App = {
   shownSection: null,
   coverageMonths: 1,
   expenseFilters: { search: '', sort: 'due' },
-  editing: { expense: null, group: null },
+  editing: { expense: null, income: null, group: null },
 };
 
 // ── Currency Configuration ────────────────────────────────────
@@ -189,6 +190,7 @@ const Money = {
   usedCodes() {
     const codes = [CurrencySettings.main.code, 'USD'];
     (App.expenses || []).forEach(e => { if (e.currency) codes.push(e.currency); });
+    (App.incomes  || []).forEach(i => { if (i.currency) codes.push(i.currency); });
     (App.balances || []).forEach(a => { if (a.currency) codes.push(a.currency); });
     return codes;
   },
@@ -265,7 +267,7 @@ async function initDashboard() {
   document.getElementById('page-loader').style.display = 'none';
   renderUserInfo();
 
-  await Promise.all([loadExpenseGroups(), loadExpenses(), loadBalances(), loadRecurring()]);
+  await Promise.all([loadExpenseGroups(), loadExpenses(), loadIncomes(), loadBalances(), loadRecurring()]);
 
   // Rates must be in place before anything renders: every amount is converted
   // from the currency it was saved in into the one being displayed.
@@ -342,7 +344,7 @@ function navigateTo(section) {
 
   // Account is a mobile-only page and needs no loader — the address it shows
   // is filled in once at sign-in.
-  const loaders = { overview: renderOverview, expenses: renderExpenses };
+  const loaders = { overview: renderOverview, income: renderIncome, expenses: renderExpenses };
   if (loaders[section]) loaders[section]();
 }
 
@@ -407,6 +409,9 @@ function _applyLayout() {
 
 // ── Data Loaders ─────────────────────────────────────────────
 async function loadBalances() { const { data } = await db.from('account_balance').select('*').eq('user_id', App.user.id).order('sort_order').order('name'); App.balances = data || []; }
+// What comes in on a schedule — a salary, usually. The row has the same shape as
+// an expense, so every cadence and date helper below reads it with no special case.
+async function loadIncomes() { const { data } = await db.from('incomes').select('*').eq('user_id', App.user.id).order('sort_order').order('name'); App.incomes = data || []; }
 // Kept only so the Expenses page can offer to import them once.
 async function loadRecurring() { const { data } = await db.from('recurring_transactions').select('*').eq('user_id', App.user.id).order('created_at'); App.recurring = data || []; }
 
@@ -583,7 +588,8 @@ function cadenceLabel(e) {
     || 'Every month';
 }
 
-// What this costs per month, in the currency on screen.
+// What this comes to per month, in the currency on screen. An income row carries
+// the same amount and cadence fields, so this measures those as well.
 function monthlyCost(e) {
   return Money.toActive(e.amount, e.currency) * DAYS_PER_MONTH / cadenceDays(e);
 }
@@ -645,33 +651,57 @@ function occurrencesIn(e, months) {
 }
 
 function activeExpenses() { return (App.expenses || []).filter(e => e.is_active); }
+function activeIncomes()  { return (App.incomes  || []).filter(i => i.is_active); }
 
 // ── Coverage ─────────────────────────────────────────────────
-// Walks the upcoming charges in date order against the stated balance. The
-// first charge the money cannot meet is where it runs out; everything from
-// there on is uncovered.
+// Walks everything that moves money, in date order, against the stated balance:
+// income lands and lifts it, charges fall due and draw it down. The first charge
+// the money cannot meet is where it runs out, and everything from there on is
+// uncovered — until the next payday, which is what makes a long window worth
+// looking at. With no income listed this is the same walk it always was.
 function coverage(months = App.coverageMonths) {
   const balance = balancesTotal();
-  const charges = [];
+  const events  = [];
+
   activeExpenses().forEach(e =>
     occurrencesIn(e, months).forEach(date =>
-      charges.push({ id: e.id, e, date, amount: Money.toActive(e.amount, e.currency) })));
+      events.push({ kind: 'charge', id: e.id, e, date, amount: Money.toActive(e.amount, e.currency) })));
 
-  charges.sort((a, b) => a.date - b.date || a.amount - b.amount || a.e.name.localeCompare(b.e.name));
+  activeIncomes().forEach(i =>
+    occurrencesIn(i, months).forEach(date =>
+      events.push({ kind: 'income', id: i.id, e: i, date, amount: Money.toActive(i.amount, i.currency) })));
 
-  const per = new Map();
-  let left = balance, breakDate = null;
-  charges.forEach(c => {
-    const r = per.get(c.id) || { covered: 0, count: 0, total: 0, first: c.date, e: c.e };
-    r.count++; r.total += c.amount;
-    if (breakDate === null && left >= c.amount) { left -= c.amount; r.covered++; c.covered = true; }
-    else { if (breakDate === null) breakDate = c.date; c.covered = false; }
-    per.set(c.id, r);
+  // Money landing on a given day is there to spend that day, so income settles
+  // before the charges it is meant to pay for.
+  events.sort((a, b) => a.date - b.date
+    || (a.kind === b.kind ? 0 : a.kind === 'income' ? -1 : 1)
+    || a.amount - b.amount
+    || a.e.name.localeCompare(b.e.name));
+
+  const per     = new Map();
+  const charges = [];
+  let left = balance, income = 0, breakDate = null, dry = false;
+
+  events.forEach(ev => {
+    if (ev.kind === 'income') {
+      left   += ev.amount;
+      income += ev.amount;
+      // Payday ends the dry spell: charges after it are weighed against the
+      // balance again rather than written off with the rest of the window.
+      dry = false;
+      return;
+    }
+    charges.push(ev);
+    const r = per.get(ev.id) || { covered: 0, count: 0, total: 0, first: ev.date, e: ev.e };
+    r.count++; r.total += ev.amount;
+    if (!dry && left >= ev.amount) { left -= ev.amount; r.covered++; ev.covered = true; }
+    else { dry = true; if (breakDate === null) breakDate = ev.date; ev.covered = false; }
+    per.set(ev.id, r);
   });
 
   const total   = charges.reduce((s, c) => s + c.amount, 0);
-  const covered = balance - left;
-  return { months, balance, charges, per, total, covered,
+  const covered = charges.reduce((s, c) => s + (c.covered ? c.amount : 0), 0);
+  return { months, balance, income, charges, per, total, covered,
            shortfall: Math.max(0, total - covered), left, breakDate };
 }
 
@@ -702,21 +732,27 @@ async function loadExpenseGroups() {
   App.expenseGroups = data || [];
 }
 
-// A charge date left in the past is rolled forward to its real next date, so
-// the stored schedule stays true without the user tidying it up.
+// A charge or payment date left in the past is rolled forward to its real next
+// date, so the stored schedule stays true without the user tidying it up.
 async function rollForwardDueDates() {
   const today = dayStart(new Date());
-  const stale = (App.expenses || []).filter(e => {
-    if (!e.is_active) return false;
-    const due = parseDay(e.next_due);
-    const next = nextChargeOf(e);
+  const stale = rows => (rows || []).filter(r => {
+    if (!r.is_active) return false;
+    const due  = parseDay(r.next_due);
+    const next = nextChargeOf(r);
     return due < today && next && +next !== +due;
   });
-  if (!stale.length) return;
-  await Promise.all(stale.map(e =>
-    db.from('expenses').update({ next_due: isoDay(nextChargeOf(e)), updated_at: new Date().toISOString() })
-      .eq('id', e.id).eq('user_id', App.user.id)));
-  await loadExpenses();
+
+  const work = [
+    { table: 'expenses', rows: stale(App.expenses), reload: loadExpenses },
+    { table: 'incomes',  rows: stale(App.incomes),  reload: loadIncomes  },
+  ].filter(w => w.rows.length);
+  if (!work.length) return;
+
+  await Promise.all(work.flatMap(w => w.rows.map(r =>
+    db.from(w.table).update({ next_due: isoDay(nextChargeOf(r)), updated_at: new Date().toISOString() })
+      .eq('id', r.id).eq('user_id', App.user.id))));
+  await Promise.all(work.map(w => w.reload()));
 }
 
 function groupOf(e) { return App.expenseGroups.find(g => g.id === e.group_id) || null; }
@@ -762,18 +798,27 @@ function renderCoverage() {
       ? `Nothing is due in ${windowPhrase(c.months)}.`
       : c.shortfall > 0
         ? `Your money runs out on ${UI.formatDate(isoDay(c.breakDate))}.`
-        : `Everything due in ${windowPhrase(c.months)} is covered.`;
+        : c.income > 0
+          ? `Everything due in ${windowPhrase(c.months)} is covered, income counted in.`
+          : `Everything due in ${windowPhrase(c.months)} is covered.`;
     sub.classList.toggle('bad', c.shortfall > 0);
   }
 
   if (fig) {
-    fig.innerHTML = `
-      <div class="cov-fig"><span>Balance</span><strong>${UI.currency(c.balance)}</strong></div>
-      <div class="cov-fig"><span>Due in ${windowLabel(c.months)}</span><strong>${UI.currency(c.total)}</strong></div>
-      <div class="cov-fig ${c.shortfall > 0 ? 'bad' : 'good'}">
+    // The income figure only earns its place when something is actually coming in.
+    fig.innerHTML = [
+      `<div class="cov-fig"><span>Balance now</span><strong>${UI.currency(c.balance)}</strong></div>`,
+      c.income > 0
+        ? `<div class="cov-fig income"><span>Coming in</span><strong>+${UI.currency(c.income)}</strong></div>`
+        : '',
+      `<div class="cov-fig"><span>Due in ${windowLabel(c.months)}</span><strong>${UI.currency(c.total)}</strong></div>`,
+      `<div class="cov-fig ${c.shortfall > 0 ? 'bad' : 'good'}">
         <span>${c.shortfall > 0 ? 'Short by' : 'Left over'}</span>
         <strong>${UI.currency(c.shortfall > 0 ? c.shortfall : c.left)}</strong>
-      </div>`;
+      </div>`,
+    ].join('');
+    // Four figures do not divide into three columns on a phone.
+    fig.classList.toggle('with-income', c.income > 0);
   }
 
   const groups = coverageByGroup(c);
@@ -951,6 +996,211 @@ function renderAttention() {
   el.innerHTML = parts.join('');
 }
 
+// ── INCOME PAGE ──────────────────────────────────────────────
+// Usually one row: a salary. It is listed the way an expense is, because it
+// works the same way — an amount, a schedule, and the date it next arrives.
+function renderIncome() {
+  renderIncomeTotals();
+  renderIncomeList();
+}
+
+function renderIncomeTotals() {
+  const card = document.getElementById('income-total-card');
+  const el   = document.getElementById('income-totals');
+  if (!card || !el) return;
+
+  // Nothing coming in, nothing to total up.
+  const active = activeIncomes();
+  card.hidden = !active.length;
+  if (!active.length) return;
+
+  const perMonth = active.reduce((s, i) => s + monthlyCost(i), 0);
+  const costs    = activeExpenses().reduce((s, e) => s + monthlyCost(e), 0);
+  const net      = perMonth - costs;
+
+  const note = !costs
+    ? 'Nothing is going out yet.'
+    : net >= 0
+      ? `Your expenses come to ${UI.currency(costs)} a month, leaving ${UI.currency(net)}.`
+      : `Your expenses come to ${UI.currency(costs)} a month — ${UI.currency(-net)} more than comes in.`;
+
+  el.innerHTML = `
+    <div class="income-totals">
+      <div class="cost-big">
+        <span class="cost-label">Every month</span>
+        <strong>${UI.currency(perMonth)}</strong>
+      </div>
+      <div class="cost-big">
+        <span class="cost-label">Every year</span>
+        <strong>${UI.currency(perMonth * 12)}</strong>
+      </div>
+      <div class="cost-big">
+        <span class="cost-label">After expenses</span>
+        <strong class="${net < 0 ? 'net-short' : ''}">${UI.currency(net)}</strong>
+      </div>
+    </div>
+    <p class="muted-note">${note}</p>`;
+}
+
+function renderIncomeList() {
+  const el = document.getElementById('income-list');
+  if (!el) return;
+
+  if (!(App.incomes || []).length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">💰</div>
+      <p>Nothing here yet. Add your salary — and anything else that arrives on a schedule — and
+      the Overview counts it towards what your balance can cover.</p>
+      <button class="btn btn-primary" onclick="openAddIncome()">+ Add your income</button></div>`;
+    return;
+  }
+
+  // Soonest first: the next payday is the thing you look for.
+  const rows = [...App.incomes].sort((a, b) =>
+    (nextChargeOf(a) || Infinity) - (nextChargeOf(b) || Infinity));
+
+  el.innerHTML = `<div class="card income-card">${rows.map(incomeRow).join('')}</div>`;
+}
+
+function incomeRow(r, i) {
+  const next  = nextChargeOf(r);
+  const ended = !next;
+  const days  = next ? Math.round((next - dayStart(new Date())) / 86400000) : null;
+  const soon  = days !== null && days <= 3;
+  const when  = ended ? 'Finished'
+    : days === 0 ? 'Today'
+    : days === 1 ? 'Tomorrow'
+    : `${UI.formatDate(isoDay(next))} · in ${days} days`;
+
+  return `
+    <div class="exp-row inc-row ${r.is_active ? '' : 'paused'}" data-id="${r.id}" style="--i:${i}">
+      <div class="exp-main">
+        <span class="exp-name">${esc(r.name)}</span>
+        <span class="exp-sub">
+          <span class="exp-cadence">${cadenceLabel(r)}</span>
+          <span class="exp-when ${soon ? 'soon' : ''} ${ended ? 'ended' : ''}">${when}</span>
+          ${r.notes ? `<span class="exp-note" title="${esc(r.notes)}">${esc(r.notes)}</span>` : ''}
+          <span class="exp-status">Paused</span>
+        </span>
+      </div>
+      <div class="exp-money">
+        <span class="exp-amount">+${Money.fmt(r.amount, r.currency)}</span>
+        <span class="exp-equiv">${UI.currency(monthlyCost(r))}/mo · ${UI.currency(monthlyCost(r) * 12)}/yr</span>
+      </div>
+      <div class="exp-actions">
+        <button class="icon-btn edit-btn" title="Edit" onclick="openEditIncome('${r.id}')">✎</button>
+        <button class="icon-btn ${r.is_active ? 'pause-btn' : 'play-btn'}"
+          title="${r.is_active ? 'Pause' : 'Resume'}"
+          onclick="toggleIncome('${r.id}',${r.is_active})">${r.is_active ? '⏸' : '▶'}</button>
+        <button class="icon-btn del-btn" title="Remove" onclick="deleteIncome('${r.id}')">✕</button>
+      </div>
+    </div>`;
+}
+
+async function toggleIncome(id, isActive) {
+  const next = !isActive;
+  applyIncomeState(id, next);
+  const { error } = await db.from('incomes')
+    .update({ is_active: next, updated_at: new Date().toISOString() })
+    .eq('id', id).eq('user_id', App.user.id);
+  if (error) { applyIncomeState(id, isActive); UI.toast(error.message, 'error'); return; }
+  const r = App.incomes.find(x => x.id === id);
+  if (r) r.is_active = next;
+  UI.toast(next ? 'Counted again.' : 'Paused — it stops counting towards your balance.', 'info');
+  // The row stays put so its fade is visible; only the totals above it move.
+  renderIncomeTotals();
+}
+
+async function deleteIncome(id) {
+  const r = App.incomes.find(x => x.id === id);
+  UI.confirm(`Remove ${r?.name || 'this income'}?`, async () => {
+    const { error } = await db.from('incomes').delete().eq('id', id).eq('user_id', App.user.id);
+    if (error) { UI.toast(error.message, 'error'); return; }
+    await loadIncomes();
+    renderIncome();
+    UI.toast('Removed.', 'success');
+  });
+}
+
+// ── Income modal ─────────────────────────────────────────────
+function openAddIncome() {
+  App.editing.income = null;
+  document.getElementById('income-modal-title').textContent = 'Add Income';
+  document.getElementById('inc-name').value = '';
+  document.getElementById('inc-amount').value = '';
+  document.getElementById('inc-cadence').value = 'monthly';
+  document.getElementById('inc-custom-days').value = '';
+  document.getElementById('inc-custom-wrap').hidden = true;
+  document.getElementById('inc-next-due').value = isoDay(new Date());
+  document.getElementById('inc-ends-on').value = '';
+  document.getElementById('inc-notes').value = '';
+  wireCadenceToggle('inc-cadence', 'inc-custom-wrap');
+  initCurrencyInputs();
+  UI.openModal('income-modal');
+}
+
+function openEditIncome(id) {
+  const r = App.incomes.find(x => x.id === id);
+  if (!r) return;
+  App.editing.income = r;
+  document.getElementById('income-modal-title').textContent = 'Edit Income';
+  document.getElementById('inc-name').value = r.name;
+  document.getElementById('inc-amount').value = Fmt.set(Money.toActive(r.amount, r.currency));
+  document.getElementById('inc-cadence').value = r.cadence;
+  document.getElementById('inc-custom-days').value = r.custom_days || '';
+  document.getElementById('inc-custom-wrap').hidden = r.cadence !== 'custom';
+  document.getElementById('inc-next-due').value = String(r.next_due).slice(0, 10);
+  document.getElementById('inc-ends-on').value = r.ends_on ? String(r.ends_on).slice(0, 10) : '';
+  document.getElementById('inc-notes').value = r.notes || '';
+  wireCadenceToggle('inc-cadence', 'inc-custom-wrap');
+  initCurrencyInputs();
+  UI.openModal('income-modal');
+}
+
+async function saveIncome() {
+  const name    = document.getElementById('inc-name').value.trim();
+  const amount  = Fmt.get(document.getElementById('inc-amount').value);
+  const cadence = document.getElementById('inc-cadence').value;
+  const custom  = parseInt(document.getElementById('inc-custom-days').value, 10);
+  const nextDue = document.getElementById('inc-next-due').value;
+  const endsOn  = document.getElementById('inc-ends-on').value || null;
+  const notes   = document.getElementById('inc-notes').value.trim() || null;
+
+  if (!name)                  { UI.toast('Give it a name — "Job salary", say.', 'error'); return; }
+  if (!amount || amount <= 0) { UI.toast('Amount must be more than zero.', 'error'); return; }
+  if (!nextDue)               { UI.toast('Pick the next payment date.', 'error'); return; }
+  if (cadence === 'custom' && !(custom >= 1 && custom <= 3650)) {
+    UI.toast('Enter how many days between payments (1–3650).', 'error'); return;
+  }
+  if (endsOn && endsOn < nextDue) { UI.toast('The end date cannot be before the next payment.', 'error'); return; }
+
+  const btn = document.getElementById('inc-save-btn');
+  UI.setLoading(btn, true);
+
+  // Recorded in the currency on screen, like every other amount here.
+  const payload = {
+    name, amount, cadence,
+    custom_days: cadence === 'custom' ? custom : null,
+    next_due: nextDue, ends_on: endsOn, notes,
+    currency: CurrencySettings.activeCode,
+    updated_at: new Date().toISOString(),
+  };
+
+  const editing = App.editing.income;
+  const { error } = editing
+    ? await db.from('incomes').update(payload).eq('id', editing.id).eq('user_id', App.user.id)
+    : await db.from('incomes').insert([{ ...payload, user_id: App.user.id,
+        sort_order: (App.incomes || []).length }]);
+
+  UI.setLoading(btn, false);
+  if (error) { UI.toast(error.message, 'error'); return; }
+
+  UI.closeModal('income-modal');
+  await loadIncomes();
+  await CurrencySettings.ensureRates(Money.usedCodes());
+  renderIncome();
+  UI.toast(editing ? 'Updated.' : `${name} added.`, 'success');
+}
+
 // ── EXPENSES PAGE ────────────────────────────────────────────
 function renderExpenses() {
   renderImportBanner();
@@ -1062,8 +1312,10 @@ function expenseRow(e, i) {
 }
 
 // Pausing flips the row in place so the fade has two states to travel between.
-function applyExpenseState(id, active) {
-  const row = document.querySelector(`.exp-row[data-id="${id}"]`);
+// Income and expenses share the row markup, so they share this — `scope` keeps
+// each page looking only at its own rows.
+function applyRowState(scope, id, active, handler) {
+  const row = document.querySelector(`${scope} .exp-row[data-id="${id}"]`);
   if (!row) return;
   row.classList.toggle('paused', !active);
   const btn = row.querySelector('.pause-btn, .play-btn');
@@ -1072,8 +1324,11 @@ function applyExpenseState(id, active) {
   btn.classList.toggle('play-btn', !active);
   btn.title = active ? 'Pause' : 'Resume';
   btn.textContent = active ? '⏸' : '▶';
-  btn.setAttribute('onclick', `toggleExpense('${id}',${active})`);
+  btn.setAttribute('onclick', `${handler}('${id}',${active})`);
 }
+
+function applyExpenseState(id, active) { applyRowState('#section-expenses', id, active, 'toggleExpense'); }
+function applyIncomeState(id, active)  { applyRowState('#section-income',   id, active, 'toggleIncome'); }
 
 async function toggleExpense(id, isActive) {
   const next = !isActive;
@@ -1135,12 +1390,13 @@ function populateGroupSelect(selected) {
   el.value = selected || '';
 }
 
-function wireCadenceToggle() {
-  const sel = document.getElementById('exp-cadence');
+function wireCadenceToggle(selectId, wrapId) {
+  const sel = document.getElementById(selectId);
   if (!sel || sel.dataset.wired) return;
   sel.dataset.wired = '1';
   sel.addEventListener('change', () => {
-    document.getElementById('exp-custom-wrap').hidden = sel.value !== 'custom';
+    const wrap = document.getElementById(wrapId);
+    if (wrap) wrap.hidden = sel.value !== 'custom';
   });
 }
 
@@ -1156,7 +1412,7 @@ function openAddExpense(groupId) {
   document.getElementById('exp-ends-on').value = '';
   document.getElementById('exp-notes').value = '';
   populateGroupSelect(groupId || '');
-  wireCadenceToggle();
+  wireCadenceToggle('exp-cadence', 'exp-custom-wrap');
   initCurrencyInputs();
   UI.openModal('expense-modal');
 }
@@ -1175,7 +1431,7 @@ function openEditExpense(id) {
   document.getElementById('exp-ends-on').value = e.ends_on ? String(e.ends_on).slice(0, 10) : '';
   document.getElementById('exp-notes').value = e.notes || '';
   populateGroupSelect(e.group_id || '');
-  wireCadenceToggle();
+  wireCadenceToggle('exp-cadence', 'exp-custom-wrap');
   initCurrencyInputs();
   UI.openModal('expense-modal');
 }
@@ -1390,6 +1646,7 @@ function updateAmountLabels() {
   const sym = CurrencySettings.activeSymbol;
   const map = {
     'lbl-exp-amount':    `Amount (${sym}) *`,
+    'lbl-inc-amount':    `Amount (${sym}) *`,
     'lbl-balance-input': `Your accounts (${sym})`,
   };
   Object.entries(map).forEach(([id, text]) => {

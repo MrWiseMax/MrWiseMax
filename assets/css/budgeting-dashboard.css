@@ -1533,6 +1533,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .cov-fig.good strong { color: var(--success); }
 .cov-fig.bad  strong { color: var(--danger); }
+.cov-fig.income strong { color: var(--success); }
 
 .coverage-list {
   margin-top: 8px;
@@ -1766,6 +1767,27 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* ── Income page ─────────────────────────────────────────── */
+/* An income row is an expense row wearing green: same markup, same responsive
+   rules, so the two pages stay in step without a second set of them. */
+.income-card { padding: 6px 18px; }
+
+.inc-row .exp-amount { color: var(--success); }
+
+/* On an expense, a charge landing within three days is a warning. On income it
+   is the opposite, so the colour follows the meaning rather than the class. */
+.inc-row .exp-when.soon { color: var(--success); }
+
+.income-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin-bottom: 6px;
+}
+
+.income-totals .cost-big strong { color: var(--success); }
+.income-totals .cost-big strong.net-short { color: var(--danger); }
 
 /* ── Expenses page ───────────────────────────────────────── */
 .expenses-head {
@@ -2098,12 +2120,18 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     padding-left: 10px;
   }
 
-  /* Three figures across one row rather than two-and-a-stray. */
+  /* Three figures across one row rather than two-and-a-stray. Once income
+     joins them there are four, which want a two-by-two block instead. */
   .coverage-figures {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px 12px;
     margin: 12px 0 2px;
+  }
+
+  .coverage-figures.with-income {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
   }
 
   .cov-fig span   { font-size: 0.58rem; letter-spacing: 0.04em; }
@@ -2118,6 +2146,11 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .coverage-sub { font-size: 0.75rem; }
 
   .cost-totals { gap: 18px; }
+
+  .income-totals { gap: 10px 14px; }
+  .income-totals .cost-big strong { font-size: 1.05rem; }
+
+  .income-card { padding: 4px 14px; }
 
   .exp-row {
     grid-template-columns: minmax(0, 1fr) auto;

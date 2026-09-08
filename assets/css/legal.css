@@ -1,0 +1,185 @@
+/* ============================================================
+   MrWiseMax — Privacy Policy & Terms of Service
+   Long-form prose, on the landing page's palette. Loaded after
+   style.css, which supplies the tokens, nav, and footer.
+   ============================================================ */
+
+.legal {
+  padding: 56px 0 72px;
+}
+
+.legal-container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ── Header ──────────────────────────────────────────────── */
+.legal-head {
+  padding-bottom: 28px;
+  margin-bottom: 32px;
+  border-bottom: 1px solid var(--border);
+}
+
+.legal-head h1 {
+  font-size: 2.6rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.legal-meta {
+  margin-top: 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.legal-lede {
+  margin-top: 18px;
+  font-size: 1.02rem;
+  color: var(--text-muted);
+}
+
+/* ── Sections ────────────────────────────────────────────── */
+.legal section {
+  margin-bottom: 38px;
+}
+
+.legal h2 {
+  font-size: 1.28rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+  /* The rule reads as a section break without needing a divider line. */
+  padding-left: 14px;
+  border-left: 3px solid var(--primary);
+}
+
+.legal h3 {
+  font-size: 0.97rem;
+  font-weight: 700;
+  margin: 22px 0 8px;
+  color: var(--primary-lt);
+}
+
+.legal p {
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.legal p:last-child {
+  margin-bottom: 0;
+}
+
+.legal strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.legal em {
+  color: var(--text);
+  font-style: normal;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+
+.legal ul {
+  margin: 0 0 16px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.legal li {
+  position: relative;
+  padding-left: 22px;
+  margin-bottom: 9px;
+  color: var(--text-muted);
+}
+
+.legal li::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0.72em;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--primary);
+  opacity: 0.75;
+}
+
+.legal a {
+  color: var(--primary-lt);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color var(--ease);
+}
+
+.legal a:hover {
+  color: var(--primary);
+}
+
+/* ── Callouts ────────────────────────────────────────────── */
+.legal-callout {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 34px;
+  color: var(--text-muted);
+}
+
+.legal-callout p {
+  margin-bottom: 12px;
+}
+
+.legal-callout p:last-child {
+  margin-bottom: 0;
+}
+
+/* Used where the reader would be worse off for skimming past it. */
+.legal-callout-warn {
+  border-left-color: #FF9800;
+  background: rgba(255, 152, 0, 0.07);
+}
+
+.legal-foot-note {
+  margin-top: 44px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+/* ── Small screens ───────────────────────────────────────── */
+@media (max-width: 768px) {
+  .legal {
+    padding: 36px 0 52px;
+  }
+
+  .legal-head h1 {
+    font-size: 2rem;
+  }
+
+  .legal-lede {
+    font-size: 0.95rem;
+  }
+
+  .legal h2 {
+    font-size: 1.12rem;
+    padding-left: 11px;
+  }
+
+  .legal section {
+    margin-bottom: 30px;
+  }
+
+  .legal-callout {
+    padding: 15px 16px;
+  }
+}

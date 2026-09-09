@@ -420,9 +420,18 @@ body {
 /* ── Two/Three col ───────────────────────────────────────── */
 .two-col {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, 1fr), not 1fr: a grid track defaults to a minimum of its content
+     width, so one long expense name would stretch its card past the column and
+     squash the other rather than ellipsis inside it. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 22px;
   margin-bottom: 22px;
+}
+
+/* The other half of the same guard: a grid item will not shrink below its own
+   content either, so the track alone does not hold it. */
+.two-col > * {
+  min-width: 0;
 }
 
 .three-col {
@@ -1843,24 +1852,15 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 
 .att-row:last-child { border-bottom: none; }
 
-.att-main {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .att-name {
   font-size: 0.84rem;
   font-weight: 600;
+  /* Sits straight in the flex row now, so it needs its own leave-to-shrink
+     before a long name will ellipsis instead of shoving the figure off. */
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.att-note {
-  font-size: 0.71rem;
-  color: var(--text-dim);
 }
 
 .att-cost {

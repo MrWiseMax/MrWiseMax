@@ -1067,15 +1067,12 @@ function renderAttention() {
 
   const priciest = [...active].sort((a, b) => monthlyCost(b) - monthlyCost(a)).slice(0, 3);
 
-  // The yearly figure sits under the name and the monthly one opposite it, so
-  // the row answers both "what does this cost me" questions at once.
+  // A name and what it costs over a year. The monthly figure is on the
+  // Expenses page for anyone who wants it; here the yearly one lands harder.
   el.innerHTML = `<div class="att-head">Costs the most</div>` + priciest.map(e => `
     <div class="att-row">
-      <div class="att-main">
-        <span class="att-name">${esc(e.name)}</span>
-        <span class="att-note">${UI.currency(monthlyCost(e) * 12)}/year</span>
-      </div>
-      <div class="att-cost">${UI.currency(monthlyCost(e))}<span class="muted-note">/mo</span></div>
+      <span class="att-name">${esc(e.name)}</span>
+      <div class="att-cost">${UI.currency(monthlyCost(e) * 12)}<span class="muted-note">/year</span></div>
     </div>`).join('');
 }
 

@@ -1098,7 +1098,9 @@ function renderAttention() {
   }
 
   parts.push(`<div class="att-head">Costs the most</div>`);
-  parts.push(priciest.map(e => item(e, cadenceLabel(e) + ' · ' + UI.currency(monthlyCost(e) * 12) + ' a year')).join(''));
+  // The cadence added nothing here — the yearly figure beside the monthly one
+  // on the right is the whole point of the row.
+  parts.push(priciest.map(e => item(e, UI.currency(monthlyCost(e) * 12) + '/year')).join(''));
 
   el.innerHTML = parts.join('');
 }

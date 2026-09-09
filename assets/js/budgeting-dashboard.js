@@ -1056,53 +1056,27 @@ function renderCostSummary() {
     </div>`;
 }
 
-const REVIEW_STALE_DAYS = 90;
-
 function renderAttention() {
   const el = document.getElementById('attention-list');
   if (!el) return;
   const active = activeExpenses();
   if (!active.length) {
-    el.innerHTML = `<p class="muted-note">Nothing to check yet.</p>`;
+    el.innerHTML = `<p class="muted-note">Nothing listed yet.</p>`;
     return;
   }
 
-  const cutoff = Date.now() - REVIEW_STALE_DAYS * 86400000;
-  const stale  = active.filter(e => new Date(e.last_reviewed_at).getTime() < cutoff)
-    .sort((a, b) => monthlyCost(b) - monthlyCost(a));
   const priciest = [...active].sort((a, b) => monthlyCost(b) - monthlyCost(a)).slice(0, 3);
 
-  const item = (e, note) => `
+  // The yearly figure sits under the name and the monthly one opposite it, so
+  // the row answers both "what does this cost me" questions at once.
+  el.innerHTML = `<div class="att-head">Costs the most</div>` + priciest.map(e => `
     <div class="att-row">
       <div class="att-main">
         <span class="att-name">${esc(e.name)}</span>
-        <span class="att-note">${note}</span>
+        <span class="att-note">${UI.currency(monthlyCost(e) * 12)}/year</span>
       </div>
       <div class="att-cost">${UI.currency(monthlyCost(e))}<span class="muted-note">/mo</span></div>
-    </div>`;
-
-  const parts = [];
-  if (stale.length) {
-    parts.push(`<div class="att-head">Not checked in ${REVIEW_STALE_DAYS}+ days</div>`);
-    parts.push(stale.slice(0, 4).map(e => `
-      <div class="att-row">
-        <div class="att-main">
-          <span class="att-name">${esc(e.name)}</span>
-          <span class="att-note">${UI.currency(monthlyCost(e) * 12)} a year if you keep it</span>
-        </div>
-        <div class="att-actions">
-          <button class="btn btn-ghost btn-sm" onclick="reviewExpense('${e.id}')">Still using it</button>
-          <button class="icon-btn del-btn" title="Remove" onclick="deleteExpense('${e.id}')">✕</button>
-        </div>
-      </div>`).join(''));
-  }
-
-  parts.push(`<div class="att-head">Costs the most</div>`);
-  // The cadence added nothing here — the yearly figure beside the monthly one
-  // on the right is the whole point of the row.
-  parts.push(priciest.map(e => item(e, UI.currency(monthlyCost(e) * 12) + '/year')).join(''));
-
-  el.innerHTML = parts.join('');
+    </div>`).join('');
 }
 
 // ── INCOME PAGE ──────────────────────────────────────────────
@@ -1478,17 +1452,6 @@ function refreshGroupTotal(groupId) {
   if (el) el.innerHTML = `${UI.currency(total)}<span class="muted-note">/mo</span>`;
 }
 
-async function reviewExpense(id) {
-  const { error } = await db.from('expenses')
-    .update({ last_reviewed_at: new Date().toISOString() })
-    .eq('id', id).eq('user_id', App.user.id);
-  if (error) { UI.toast(error.message, 'error'); return; }
-  const e = App.expenses.find(x => x.id === id);
-  if (e) e.last_reviewed_at = new Date().toISOString();
-  UI.toast('Marked as checked.', 'success');
-  renderAttention();
-}
-
 async function deleteExpense(id) {
   const e = App.expenses.find(x => x.id === id);
   UI.confirm(`Remove ${e?.name || 'this expense'}?`, async () => {
@@ -1599,7 +1562,7 @@ async function saveExpense() {
   const { error } = App.editing.expense
     ? await db.from('expenses').update(payload).eq('id', App.editing.expense.id).eq('user_id', App.user.id)
     : await db.from('expenses').insert([{ ...payload, user_id: App.user.id,
-        sort_order: (App.expenses || []).length, last_reviewed_at: new Date().toISOString() }]);
+        sort_order: (App.expenses || []).length }]);
 
   UI.setLoading(btn, false);
   if (error) { UI.toast(error.message, 'error'); return; }

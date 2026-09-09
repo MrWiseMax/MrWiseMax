@@ -1829,10 +1829,8 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   text-transform: uppercase;
   letter-spacing: 0.09em;
   color: var(--text-dim);
-  margin: 14px 0 4px;
+  margin: 4px 0;
 }
-
-.att-head:first-child { margin-top: 4px; }
 
 .att-row {
   display: flex;
@@ -1871,12 +1869,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   white-space: nowrap;
 }
 
-.att-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
 
 /* ── Income page ─────────────────────────────────────────── */
 /* An income row is an expense row wearing green: same markup, same responsive

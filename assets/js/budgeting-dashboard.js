@@ -340,14 +340,6 @@ async function initDashboard() {
   if (!user) return;
   App.user = user;
 
-  // Gate: redirect to onboarding if not completed
-  const { data: profileCheck } = await db.from('profiles')
-    .select('onboarding_complete').eq('id', user.id).single();
-  if (!profileCheck?.onboarding_complete) {
-    window.location.href = 'budgeting-onboarding.html';
-    return;
-  }
-
   CurrencySettings.init();
   updateCurrencyBanner();
   document.getElementById('page-loader').style.display = 'none';

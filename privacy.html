@@ -37,7 +37,7 @@
 
       <header class="legal-head">
         <h1>Privacy Policy</h1>
-        <p class="legal-meta">Last updated 8 September 2026</p>
+        <p class="legal-meta">Last updated 10 September 2026</p>
         <p class="legal-lede">
           MrWiseMax is a free budgeting tool that tells you whether your bank balance covers what is
           coming out of it. This page explains exactly what it stores, where that data lives, and how
@@ -71,19 +71,18 @@
         </p>
         <ul>
           <li><strong>Your email address</strong> — used to identify your account and shown back to you on the Account page.</li>
-          <li><strong>Your name</strong> — stored on your profile record.</li>
-          <li><strong>Your Google profile picture</strong> — stored as a link on your profile record.</li>
+          <li><strong>Your name</strong> — recorded against your account.</li>
+          <li><strong>Your Google profile picture</strong> — recorded as a link against your account.</li>
         </ul>
         <p>
-          Your email address is the only one of these the app shows you day to day, on the Account
-          page. Your Google picture appears once, on the first-time setup screen, where it is offered
-          as your starting profile photo. We request no other Google permissions: no access to Gmail,
-          Drive, Contacts, Calendar, or anything else in your Google account.
+          Your email address is the only one of these the app ever shows you, on the Account page.
+          Your name and picture are simply what Google hands over at sign-in; nothing in the app
+          displays them. We request no other Google permissions: no access to Gmail, Drive, Contacts,
+          Calendar, or anything else in your Google account.
         </p>
 
         <h3>Information you type into the app</h3>
         <ul>
-          <li><strong>A username and display nickname</strong>, and optionally a profile photo you upload, set once when you first sign in.</li>
           <li><strong>Your accounts</strong> — the name you give each account, the amount you say it holds, its currency, and the date you last confirmed it.</li>
           <li><strong>Your expenses</strong> — name, amount, currency, how often it charges, the next charge date, an optional end date, an optional note, and the group you file it under.</li>
           <li><strong>Your income</strong> — the same fields, for anything that pays you on a schedule.</li>
@@ -147,13 +146,10 @@
           only by the signed-in account that owns it. Another signed-in user cannot query your rows,
           and the public API key published in the app's source cannot read them either.
         </p>
-        <div class="legal-callout legal-callout-warn">
-          <strong>One exception worth knowing.</strong> If you upload a profile photo during setup, it
-          is placed in a public storage bucket. That means anyone who knows or guesses its direct link
-          can view that image, even without a MrWiseMax account. Please do not upload a photo you would
-          not be comfortable being publicly reachable. Your financial entries are <em>not</em> affected
-          by this — those remain private to your account.
-        </div>
+        <p>
+          The app holds no photos or files of yours — there is nothing to upload to it. Everything it
+          stores about you is the text and figures listed above.
+        </p>
       </section>
 
       <section>
@@ -165,7 +161,7 @@
         </p>
         <ul>
           <li><strong>Google</strong> — provides sign-in, and receives the fact that you signed in to this app.</li>
-          <li><strong>Supabase</strong> — hosts the database, authentication, and file storage described above.</li>
+          <li><strong>Supabase</strong> — hosts the database and the authentication described above.</li>
           <li><strong>GitHub Pages</strong> — serves the website's pages and files.</li>
           <li><strong>Google Fonts</strong> — serves the Inter typeface.</li>
           <li><strong>jsDelivr</strong> — serves the Supabase browser library and a free daily exchange-rate feed.</li>

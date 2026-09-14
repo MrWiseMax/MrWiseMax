@@ -1254,42 +1254,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   flex-shrink: 0;
 }
 
-/* ── USD View Mode Banner ────────────────────────────────── */
-.usd-view-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 20px;
-  background: rgba(33, 150, 243, 0.12);
-  border-bottom: 1px solid rgba(33, 150, 243, 0.25);
-  flex-shrink: 0;
-}
-
-.usd-banner-text {
-  font-size: 0.8rem;
-  color: var(--info);
-  font-weight: 500;
-}
-
-.usd-banner-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--info);
-  background: rgba(33, 150, 243, 0.15);
-  border: 1px solid rgba(33, 150, 243, 0.3);
-  border-radius: 8px;
-  padding: 4px 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background var(--ease), border-color var(--ease);
-  flex-shrink: 0;
-  line-height: 18px;
-}
-
 /* ── Currency Status Row (modal) ─────────────────────────── */
 .cur-status-row {
   display: flex;

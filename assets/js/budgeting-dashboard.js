@@ -166,7 +166,7 @@ const CurrencySettings = {
     }));
   },
 
-  _applyViewMode() { this.save(); updateCurrencyBanner(); },
+  _applyViewMode() { this.save(); updateAmountLabels(); },
 };
 
 // -- Money ----------------------------------------------------
@@ -341,7 +341,7 @@ async function initDashboard() {
   App.user = user;
 
   CurrencySettings.init();
-  updateCurrencyBanner();
+  updateAmountLabels();
   document.getElementById('page-loader').style.display = 'none';
   renderUserInfo();
 
@@ -1730,12 +1730,6 @@ function setupExpenseControls() {
 function setText(id, value) { const el = document.getElementById(id); if (el) el.textContent = value; }
 
 // ── SETTINGS ─────────────────────────────────────────────────
-function updateCurrencyBanner() {
-  const banner = document.getElementById('usd-view-banner');
-  if (banner) banner.style.display = CurrencySettings.isUSDMode ? 'flex' : 'none';
-  updateAmountLabels();
-}
-
 function updateAmountLabels() {
   const sym = CurrencySettings.activeSymbol;
   const map = {
@@ -1747,13 +1741,6 @@ function updateAmountLabels() {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   });
-}
-
-function exitUSDMode() {
-  CurrencySettings.viewCurrency = 'main';
-  CurrencySettings._applyViewMode();
-  navigateTo(App.activeSection);
-  UI.toast(`Back to ${CurrencySettings.main.name} (${CurrencySettings.main.code})`, 'success');
 }
 
 function openCurrencySettingsModal() {
@@ -1776,7 +1763,7 @@ function renderCurrencyStatusRow() {
 
   const mainCard = `
     <div class="cur-status-card${!isUSDMode ? ' cur-status-active' : ''}"
-      ${isUSDMode ? 'style="cursor:pointer" onclick="UI.closeModal(\'currency-modal\'); exitUSDMode();"' : ''}>
+      ${isUSDMode ? `style="cursor:pointer" onclick="selectCurrency('${main.code}')"` : ''}>
       <div class="cur-status-label">Main Currency${isUSDMode ? ' — click to restore' : ''}</div>
       <div class="cur-status-flag">${main.flag}</div>
       <div class="cur-status-name">${main.name}</div>
@@ -1876,7 +1863,7 @@ function selectCurrency(code) {
       CurrencySettings.viewCurrency = 'main';
       await CurrencySettings.ensureRates(Money.usedCodes());
       CurrencySettings.save();
-      updateCurrencyBanner();
+      updateAmountLabels();
       navigateTo(App.activeSection);
       UI.toast(`Currency set to ${found.name} (${found.code})`, 'success');
     },

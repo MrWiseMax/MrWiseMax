@@ -423,7 +423,8 @@ function navigateTo(section) {
 
   // Account is a mobile-only page and needs no loader — the address it shows
   // is filled in once at sign-in.
-  const loaders = { overview: renderOverview, income: renderIncome, expenses: renderExpenses };
+  const loaders = { overview: renderOverview, income: renderIncome, expenses: renderExpenses,
+                    assistant: renderAssistant };
   if (loaders[section]) loaders[section]();
 }
 
@@ -477,7 +478,14 @@ function _applyLayout() {
   dashContent.style.paddingBottom = isMobile ? `${navH + padH}px` : '';
 
   // -- Every section gets a min-height so it fills the full visible area --
+  // The assistant is the exception: a chat is exactly one screen tall, so its
+  // conversation scrolls inside it and the box you type into stays in reach.
   document.querySelectorAll('.dash-section').forEach(s => {
+    if (s.id === 'section-assistant') {
+      s.style.minHeight = '';
+      s.style.height = `${availH - padH * 2}px`;
+      return;
+    }
     s.style.minHeight = `${availH}px`;
   });
 

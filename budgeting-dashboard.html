@@ -13,6 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/css/budgeting-dashboard.css">
+  <link rel="stylesheet" href="assets/css/budgeting-assistant.css">
 </head>
 
 <body>
@@ -40,6 +41,7 @@
         <button class="nav-item active" data-nav="overview"><span class="nav-icon">📊</span> Overview</button>
         <button class="nav-item" data-nav="income"><span class="nav-icon">💰</span> Income</button>
         <button class="nav-item" data-nav="expenses"><span class="nav-icon">🧾</span> Expenses</button>
+        <button class="nav-item" data-nav="assistant"><span class="nav-icon">✨</span> Assistant</button>
       </nav>
 
       <div class="sidebar-bottom">
@@ -182,6 +184,37 @@
         </section>
 
         <!-- ═══════════════════════════════════════
+           SECTION: ASSISTANT
+      ═══════════════════════════════════════ -->
+        <section class="dash-section" id="section-assistant">
+          <div class="chat">
+            <div class="chat-head">
+              <div>
+                <h1 class="section-title">Assistant</h1>
+                <p class="section-subtitle chat-subtitle">Knows your balances, income and expenses &mdash;
+                  ask it anything about your money.</p>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button" id="chat-new" hidden>New chat</button>
+            </div>
+
+            <div class="chat-log" id="chat-log" role="log" aria-live="polite"></div>
+
+            <form class="chat-composer" id="chat-form" autocomplete="off">
+              <textarea class="chat-input" id="chat-input" rows="1" maxlength="2000"
+                placeholder="Ask about your money…" aria-label="Your question"></textarea>
+              <button class="chat-send" id="chat-send" type="submit" aria-label="Send" disabled>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="19" x2="12" y2="5" />
+                  <polyline points="5 12 12 5 19 12" />
+                </svg>
+              </button>
+            </form>
+            <p class="chat-foot" id="chat-foot"></p>
+          </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════
            SECTION: ACCOUNT — mobile only; the sidebar covers this on desktop
       ═══════════════════════════════════════ -->
         <section class="dash-section" id="section-account">
@@ -221,6 +254,9 @@
     </button>
     <button class="mobile-nav-item" data-nav="expenses">
       <span class="mobile-nav-icon">🧾</span>Expenses
+    </button>
+    <button class="mobile-nav-item" data-nav="assistant">
+      <span class="mobile-nav-icon">✨</span>Assistant
     </button>
     <button class="mobile-nav-item" data-nav="account">
       <span class="mobile-nav-icon">
@@ -502,6 +538,7 @@
   <script src="assets/js/budgeting-auth.js"></script>
   <script src="assets/js/nav-history.js"></script>
   <script src="assets/js/budgeting-dashboard.js"></script>
+  <script src="assets/js/budgeting-assistant.js"></script>
   <script>
     // Populate day-of-month select (1–28 — safe for all months)
     (function () {

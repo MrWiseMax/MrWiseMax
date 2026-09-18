@@ -17,10 +17,13 @@ const Chat = {
   wired: false,
   loaded: false,
   loading: null,
-  // { role: 'user' | 'assistant', content, pending?, error?, retry? }
+  // { role: 'user' | 'assistant', content, el?, and while an answer streams:
+  //   pending, live, streaming, shown, question; error and retry if it failed }
   messages: [],
   busy: false,
   remaining: null,
+  // Whether a streaming answer may still scroll the log (see followAnswer).
+  follow: false,
 };
 
 // Where to start, for someone looking at an empty conversation.
@@ -345,6 +348,121 @@ const ChatMarkdown = (() => {
   return { render };
 })();
 
+// ── Motion ───────────────────────────────────────────────────
+// Everything on this page moves on the app's own easing curve. Anyone whose
+// device asks for less motion gets the same page, with none of it.
+const Motion = {
+  get reduced() { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; },
+  EASE: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+
+  // Plays a keyframe list and resolves when it is over. The timeout matters in
+  // a background tab, where animations can stall and would hold up whatever
+  // is waiting on them.
+  play(el, frames, opts = {}) {
+    if (!el || !el.animate || this.reduced) return Promise.resolve();
+    const run = el.animate(frames, { easing: this.EASE, ...opts });
+    const limit = (opts.duration || 0) + (opts.delay || 0) + 150;
+    return Promise.race([run.finished.catch(() => {}), new Promise(r => setTimeout(r, limit))]);
+  },
+
+  // Fades elements out as they lift away. They stay hidden afterwards, so the
+  // caller can remove them without a flash.
+  leave(els, duration = 200) {
+    return Promise.all([...els].map((el, i) => this.play(el,
+      [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-10px) scale(0.98)' }],
+      { duration, delay: Math.min(i, 6) * 25, fill: 'forwards' })));
+  },
+
+  // Moves an element from where `from` was on screen to where it now sits, so
+  // it seems to travel there: the chip you tapped, or the box you typed in,
+  // becomes your message.
+  flyFrom(el, from) {
+    if (!el || !from || this.reduced) return;
+    const to = el.getBoundingClientRect();
+    const dx = (from.left + from.width / 2) - (to.left + to.width / 2);
+    const dy = (from.top + from.height / 2) - (to.top + to.height / 2);
+    const scale = Math.max(0.8, Math.min(1, from.width / to.width));
+    this.play(el, [
+      { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0.4 },
+      { transform: 'none', opacity: 1 },
+    ], { duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+  },
+
+  // Counts a figure up from zero, formatted the way the app shows money,
+  // starting once whatever it sits in has had `delay` ms to fade in.
+  countUp(el, { duration = 1000, delay = 0 } = {}) {
+    const to = parseFloat(el?.dataset.count);
+    if (!el || !isFinite(to) || this.reduced || document.hidden) return;
+    el.textContent = UI.currency(0);
+    let start = null;
+    const tick = now => {
+      if (start === null) start = now + delay;
+      const t = Math.max(0, Math.min(1, (now - start) / duration));
+      el.textContent = UI.currency(to * (1 - Math.pow(1 - t, 3)));
+      if (t < 1 && el.isConnected) requestAnimationFrame(tick);
+      else el.textContent = UI.currency(to);
+    };
+    requestAnimationFrame(tick);
+  },
+};
+
+// ── Updating an answer in place ──────────────────────────────
+// A streaming answer is redrawn many times a second. Rather than replacing it
+// wholesale, each new version is laid over the old one node by node: whatever
+// has not changed stays exactly as it is, text that grew is extended, and only
+// genuinely new blocks — a paragraph, a list item, a table row — are added,
+// each easing in as it arrives.
+const ENTERING = new Set(['P', 'LI', 'TR', 'H3', 'H4', 'BLOCKQUOTE', 'PRE', 'HR', 'UL', 'OL', 'DIV']);
+
+function morphInto(target, html) {
+  const next = document.createElement('template');
+  next.innerHTML = html;
+  morphChildren(target, next.content);
+}
+
+function morphChildren(from, to) {
+  const was = [...from.childNodes];
+  const now = [...to.childNodes];
+  now.forEach((node, i) => {
+    const old = was[i];
+    if (!old) { from.appendChild(entering(node)); return; }
+    if (old.nodeType !== node.nodeType || old.nodeName !== node.nodeName) {
+      from.replaceChild(entering(node), old);
+      return;
+    }
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (old.nodeValue !== node.nodeValue) old.nodeValue = node.nodeValue;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) { from.replaceChild(node, old); return; }
+    syncAttributes(old, node);
+    morphChildren(old, node);
+  });
+  for (let i = was.length - 1; i >= now.length; i--) was[i].remove();
+}
+
+function entering(node) {
+  if (node.nodeType === Node.ELEMENT_NODE && ENTERING.has(node.nodeName)) node.classList.add('md-in');
+  return node;
+}
+
+// Attributes follow the new version — except the entrance class an element was
+// given when it arrived, since taking that away mid-animation would snap it.
+function syncAttributes(old, node) {
+  for (const { name } of [...old.attributes]) {
+    if (name !== 'class' && !node.hasAttribute(name)) old.removeAttribute(name);
+  }
+  for (const { name, value } of [...node.attributes]) {
+    if (name !== 'class' && old.getAttribute(name) !== value) old.setAttribute(name, value);
+  }
+  const arriving = old.classList.contains('md-in');
+  const want = node.getAttribute('class') || '';
+  const have = (old.getAttribute('class') || '').replace(/\bmd-in\b/, '').trim();
+  if (want === have) return;
+  if (want) old.setAttribute('class', want); else old.removeAttribute('class');
+  if (arriving) old.classList.add('md-in');
+}
+
 // ── Page ─────────────────────────────────────────────────────
 function renderAssistant() {
   wireAssistant();
@@ -371,8 +489,10 @@ async function loadChat() {
       console.warn('[Assistant] could not load the conversation:', e.message);
     }
     Chat.loaded = true;
-    drawChat();
-    scrollChat(true);
+    const log = document.getElementById('chat-log');
+    await Motion.leave(log?.querySelectorAll('.chat-skeleton') || [], 160);
+    drawChat({ intro: true });
+    if (Chat.messages.length) scrollChat();
   })();
   return Chat.loading;
 }
@@ -384,6 +504,7 @@ function wireAssistant() {
   const form  = document.getElementById('chat-form');
   const input = document.getElementById('chat-input');
   const log   = document.getElementById('chat-log');
+  const send  = document.getElementById('chat-send');
 
   input.addEventListener('input', () => { sizeChatInput(); updateComposer(); });
   input.addEventListener('keydown', e => {
@@ -398,9 +519,13 @@ function wireAssistant() {
     e.preventDefault();
     const text = input.value.trim();
     if (!text || Chat.busy) return;
+    const from = input.getBoundingClientRect();
+    send.classList.remove('launch');
+    void send.offsetWidth;          // restart the launch even on a quick second send
+    send.classList.add('launch');
     input.value = '';
     sizeChatInput();
-    sendChat(text);
+    sendChat(text, from);
   });
 
   // Any scroll the reader makes themselves ends the auto-follow for this answer.
@@ -409,11 +534,26 @@ function wireAssistant() {
   log.addEventListener('touchmove', takeOver, { passive: true });
   log.addEventListener('keydown', takeOver);
 
+  let checking = 0;
+  log.addEventListener('scroll', () => {
+    if (checking) return;
+    checking = requestAnimationFrame(() => { checking = 0; checkJump(); });
+  }, { passive: true });
+
+  document.getElementById('chat-jump')?.addEventListener('click', () => {
+    log.scrollTo({ top: log.scrollHeight, behavior: Motion.reduced ? 'auto' : 'smooth' });
+  });
+
   log.addEventListener('click', e => {
     const starter = e.target.closest('[data-ask]');
-    if (starter) { sendChat(starter.dataset.ask); return; }
-    const retry = e.target.closest('[data-retry]');
-    if (retry) retryChat(+retry.dataset.retry);
+    if (starter) {
+      if (Chat.busy) return;
+      starter.classList.add('picked');
+      sendChat(starter.dataset.ask, starter.getBoundingClientRect());
+      return;
+    }
+    const retry = e.target.closest('.chat-retry');
+    if (retry) retryChat(Chat.messages.find(m => m.el === retry.closest('.chat-msg')));
   });
 
   document.getElementById('chat-new')?.addEventListener('click', resetChat);
@@ -430,6 +570,7 @@ function updateComposer() {
   const input = document.getElementById('chat-input');
   const send  = document.getElementById('chat-send');
   if (send && input) send.disabled = Chat.busy || !input.value.trim();
+  document.getElementById('chat-form')?.classList.toggle('busy', Chat.busy);
   const reset = document.getElementById('chat-new');
   if (reset) reset.hidden = !Chat.messages.length;
   if (reset) reset.disabled = Chat.busy;
@@ -442,80 +583,172 @@ function updateComposer() {
   }
 }
 
+// The round button that takes you back down, shown once you have scrolled
+// well up from the latest message.
+function checkJump() {
+  const log = document.getElementById('chat-log');
+  const btn = document.getElementById('chat-jump');
+  if (!log || !btn) return;
+  const away = !!Chat.messages.length && log.scrollHeight - log.scrollTop - log.clientHeight > 240;
+  btn.classList.toggle('show', away);
+  btn.tabIndex = away ? 0 : -1;
+  btn.setAttribute('aria-hidden', String(!away));
+}
+
 // ── Drawing the conversation ─────────────────────────────────
-function drawChat() {
+// The whole log is built only when the page is opened, when the history
+// arrives, and after a new chat. Everything else adds to it or updates one
+// message, so nothing already on screen replays its entrance.
+function drawChat({ intro = false } = {}) {
   const log = document.getElementById('chat-log');
   if (!log) return;
-  log.innerHTML = !Chat.loaded && !Chat.messages.length
-    ? `<div class="chat-loading"><span class="spinner"></span></div>`
-    : Chat.messages.length ? Chat.messages.map(chatMessageHtml).join('') : chatWelcomeHtml();
+  if (!Chat.loaded && !Chat.messages.length) {
+    log.innerHTML = chatSkeletonHtml();
+  } else if (!Chat.messages.length) {
+    log.innerHTML = chatWelcomeHtml();
+    // The welcome reads from the top, however tall it is.
+    log.scrollTop = 0;
+    // The figures start counting as the chart around them finishes fading in.
+    log.querySelectorAll('[data-count]').forEach(el => Motion.countUp(el, { delay: 280 }));
+  } else {
+    log.replaceChildren(...Chat.messages.map(chatMessageEl));
+    if (intro) {
+      // The last few — the ones in view — settle in one after another.
+      Chat.messages.slice(-6).forEach((m, k) => {
+        m.el.classList.add('enter');
+        m.el.style.setProperty('--d', `${k * 50}ms`);
+      });
+    }
+  }
   log.setAttribute('aria-busy', String(Chat.busy));
   updateComposer();
+  checkJump();
 }
 
-function chatMessageHtml(m, i) {
+function chatMessageEl(m) {
+  const el = document.createElement('div');
   if (m.role === 'user') {
-    return `<div class="chat-msg user" data-i="${i}"><div class="chat-bubble">${esc(m.content)}</div></div>`;
+    el.className = 'chat-msg user';
+    el.innerHTML = `<div class="chat-bubble">${esc(m.content)}</div>`;
+  } else {
+    el.className = `chat-msg bot${m.error ? ' error' : ''}${m.live ? ' live' : ''}`;
+    el.innerHTML = `<div class="chat-avatar" aria-hidden="true">✦</div><div class="chat-bubble md"></div>`;
+    const bubble = el.querySelector('.chat-bubble');
+    bubble.innerHTML = chatBotBody(m);
+    placeCaret(bubble, m);
   }
-  return `<div class="chat-msg bot${m.error ? ' error' : ''}" data-i="${i}">
-    <div class="chat-avatar" aria-hidden="true">✦</div>
-    <div class="chat-bubble md">${chatBotBody(m, i)}</div>
-  </div>`;
+  m.el = el;
+  return el;
 }
 
-function chatBotBody(m, i) {
-  if (m.pending && !m.content) {
-    return `<div class="chat-typing" aria-label="Thinking"><span></span><span></span><span></span>
-      <em>Looking at your numbers…</em></div>`;
+const THINKING = [
+  'Looking at your numbers…',
+  'Checking what’s coming up…',
+  'Weighing up the options…',
+  'Putting it into words…',
+];
+
+function chatBotBody(m) {
+  const text = m.live ? revealedText(m) : m.content;
+  if (!text && !m.error) {
+    return `<div class="chat-typing" role="status"><span class="chat-dots"><i></i><i></i><i></i></span>` +
+      `<em class="chat-status">${esc(m.status || THINKING[0])}</em></div>`;
   }
-  let html = m.content ? ChatMarkdown.render(m.content) : '';
-  if (m.error) {
+  let html = text ? ChatMarkdown.render(text) : '';
+  if (m.error && !m.live) {
     html += `<div class="chat-error"><span>${esc(m.error)}</span>` +
-      (m.retry ? `<button class="btn btn-ghost btn-sm" type="button" data-retry="${i}">Try again</button>` : '') +
+      (m.retry ? `<button class="btn btn-ghost btn-sm chat-retry" type="button">Try again</button>` : '') +
       `</div>`;
   }
   return html;
 }
 
+// What of a streaming answer to show right now. Unfinished Markdown is tidied
+// so it never flashes on screen: an open **bold** or `code` is closed early,
+// and a line holding nothing yet but a list, heading or table marker waits
+// until it has words in it.
+function revealedText(m) {
+  let s = m.content.slice(0, m.shown || 0);
+  s = s.replace(/(^|\n)[ \t]*[#>*+\-|\d.)]{1,4}[ \t]*$/, '$1');
+  if ((s.match(/\*\*/g) || []).length % 2) s += '**';
+  if ((s.match(/`/g) || []).length % 2) s += '`';
+  return s;
+}
+
+// A pulsing dot after the last word, while the answer is still coming.
+function placeCaret(bubble, m) {
+  bubble.querySelector('.chat-caret')?.remove();
+  if (!m.live || !bubble.querySelector('p, li, h3, h4, td, th, pre')) return;
+  const blocks = bubble.querySelectorAll('p, li, h3, h4, td, th, pre');
+  const caret = document.createElement('span');
+  caret.className = 'chat-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  blocks[blocks.length - 1].appendChild(caret);
+}
+
+function chatSkeletonHtml() {
+  return `<div class="chat-skeleton" aria-label="Loading your conversation">
+    <div class="sk-row user"><span class="sk" style="width:44%"></span></div>
+    <div class="sk-row bot"><span class="sk-dot"></span>
+      <div class="sk-lines"><span class="sk" style="width:94%"></span><span class="sk" style="width:80%"></span>
+        <span class="sk" style="width:56%"></span></div></div>
+    <div class="sk-row user"><span class="sk" style="width:32%"></span></div>
+  </div>`;
+}
+
 function chatWelcomeHtml() {
   const accounts = App.balances || [];
   const inc = activeIncomes(), exp = activeExpenses();
-  const seen = [
-    accounts.length
-      ? `${UI.currency(balancesTotal())} across ${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'}`
-      : 'No accounts yet',
-    inc.length
-      ? `${inc.length} ${inc.length === 1 ? 'income' : 'incomes'} · ${UI.currency(inc.reduce((s, i) => s + monthlyCost(i), 0))}/mo`
-      : 'No income yet',
-    exp.length
-      ? `${exp.length} ${exp.length === 1 ? 'expense' : 'expenses'} · ${UI.currency(exp.reduce((s, e) => s + monthlyCost(e), 0))}/mo`
-      : 'No expenses yet',
-  ];
+  const balance = balancesTotal();
+  const inMonth  = inc.reduce((s, i) => s + monthlyCost(i), 0);
+  const outMonth = exp.reduce((s, e) => s + monthlyCost(e), 0);
+  const most = Math.max(inMonth, outMonth, 1);
+  const money = v => `<span data-count="${Math.round(v)}">${UI.currency(v)}</span>`;
+  const bar = (kind, label, v, n, noun) => `
+    <div class="snap-row">
+      <span class="snap-label">${label}</span>
+      <span class="snap-bar"><i class="${kind}" style="--w:${(v / most) * 100}%"></i></span>
+      <span class="snap-val">${n ? `${money(v)}<small>/mo</small>` : `<em>No ${noun} yet</em>`}</span>
+    </div>`;
+
+  // --k orders the entrance: each piece rises a beat after the one before.
+  let k = 0;
+  const next = () => `style="--k:${k++}"`;
   return `
     <div class="chat-welcome">
-      <div class="chat-welcome-icon" aria-hidden="true">✦</div>
-      <h2>Your money, talked through</h2>
-      <p>I can see what's in your accounts, what comes in and what goes out. Tell me what you're
+      <div class="chat-welcome-icon" aria-hidden="true" ${next()}>✦</div>
+      <h2 ${next()}>Your money, talked through</h2>
+      <p ${next()}>I can see what's in your accounts, what comes in and what goes out. Tell me what you're
         aiming for and I'll work out how to get there — or start with one of these.</p>
-      <div class="chat-seen">${seen.map(s => `<span>${esc(s)}</span>`).join('')}</div>
-      <div class="chat-suggest">
-        ${ASSISTANT_STARTERS.map(q => `<button class="chat-chip" type="button" data-ask="${esc(q)}">${esc(q)}</button>`).join('')}
+      <div class="chat-snapshot" ${next()} aria-label="What the assistant can see">
+        <div class="snap-row snap-balance">
+          <span class="snap-label">In the bank</span>
+          <span class="snap-meta">${accounts.length
+            ? `across ${accounts.length} ${accounts.length === 1 ? 'account' : 'accounts'}` : 'no accounts added'}</span>
+          <span class="snap-val">${accounts.length ? money(balance) : '—'}</span>
+        </div>
+        ${bar('in', 'Coming in', inMonth, inc.length, 'income')}
+        ${bar('out', 'Going out', outMonth, exp.length, 'expenses')}
       </div>
-      <p class="chat-privacy">To answer, your figures and questions are sent to Google Gemini.
+      <div class="chat-suggest">
+        ${ASSISTANT_STARTERS.map(q =>
+          `<button class="chat-chip" type="button" data-ask="${esc(q)}" ${next()}>${esc(q)}</button>`).join('')}
+      </div>
+      <p class="chat-privacy" ${next()}>To answer, your figures and questions are sent to Google Gemini.
         Never type passwords or card numbers here.</p>
     </div>`;
 }
 
-// Redraws one message in place — used for every piece of a streaming answer, so
-// the rest of the conversation is left alone. Found by identity rather than by
-// position, which a new chat or a retry can shift.
+// Redraws one answer in place: morphed rather than replaced, so a streaming
+// answer only ever adds to what is already on screen.
 function paintChatMessage(m) {
-  const i = Chat.messages.indexOf(m);
-  if (i < 0) return;
-  const el = document.querySelector(`#chat-log .chat-msg[data-i="${i}"]`);
-  if (!el) { drawChat(); return; }
-  el.classList.toggle('error', !!m.error);
-  el.querySelector('.chat-bubble').innerHTML = chatBotBody(m, i);
+  const el = m.el;
+  if (!el?.isConnected) return;
+  el.classList.toggle('error', !!m.error && !m.live);
+  el.classList.toggle('live', !!m.live);
+  const bubble = el.querySelector('.chat-bubble');
+  morphInto(bubble, chatBotBody(m));
+  placeCaret(bubble, m);
 }
 
 function scrollChat() {
@@ -528,17 +761,61 @@ function scrollChat() {
 // there, so a long answer is read from its beginning while the rest streams in.
 // Scrolling by hand at any point hands control back to the reader.
 function followAnswer(answer) {
-  if (!Chat.follow) return;
+  const question = answer.question?.el;
+  if (!Chat.follow || !question?.isConnected) return;
   const log = document.getElementById('chat-log');
-  const i = Chat.messages.indexOf(answer);
-  const question = log?.querySelector(`.chat-msg[data-i="${i - 1}"]`);
-  if (!question) return;
-  const target = Math.min(log.scrollHeight - log.clientHeight, question.offsetTop - 8);
+  const target = Math.min(log.scrollHeight - log.clientHeight, question.offsetTop - 12);
   if (target > log.scrollTop) log.scrollTop = target;
 }
 
+// ── Letting the answer out ───────────────────────────────────
+// Streamed text arrives in bursts. It is let out at a steady pace instead —
+// faster when a lot is waiting — so the answer reads as it flows rather than
+// jumping a sentence at a time.
+function revealAnswer(m) {
+  if (m.revealing) return;
+  // No one is watching a background tab, and it gets no animation frames, so
+  // the text goes straight in rather than waiting there to be let out.
+  if (Motion.reduced || document.hidden) {
+    m.shown = m.content.length;
+    paintChatMessage(m);
+    followAnswer(m);
+    return;
+  }
+  m.revealing = true;
+  let last = performance.now();
+  const tick = now => {
+    const dt = Math.min(64, now - last);
+    last = now;
+    const waiting = m.content.length - (m.shown || 0);
+    if (waiting > 0) {
+      // Whatever has arrived drains over about a third of a second, and more
+      // quickly once the whole answer is in.
+      const span = m.streaming ? 340 : 150;
+      m.shown = Math.min(m.content.length, (m.shown || 0) + Math.max(1, Math.round(waiting * dt / span)));
+      paintChatMessage(m);
+      followAnswer(m);
+    }
+    if (m.shown < m.content.length || m.streaming) { requestAnimationFrame(tick); return; }
+    m.revealing = false;
+    settleAnswer(m);
+  };
+  requestAnimationFrame(tick);
+}
+
+// The answer is complete and fully shown: drop the live styling, and show any
+// error that came with it.
+function settleAnswer(m) {
+  m.live = false;
+  m.shown = m.content.length;
+  paintChatMessage(m);
+  followAnswer(m);
+}
+
 // ── Asking ───────────────────────────────────────────────────
-async function sendChat(text) {
+// `from` is where on screen the question came from — the chip that was tapped,
+// or the box it was typed in — so it can be seen to travel into the chat.
+async function sendChat(text, from) {
   text = String(text || '').trim();
   if (!text || Chat.busy) return;
   if (text.length > ASSISTANT_MAX_QUESTION) {
@@ -552,18 +829,45 @@ async function sendChat(text) {
   // after it rather than being swept away when it arrives.
   if (!Chat.loaded) await loadChat();
 
-  Chat.messages.push({ role: 'user', content: text });
-  const answer = { role: 'assistant', content: '', pending: true };
-  Chat.messages.push(answer);
-  Chat.follow = true;
-  drawChat();
-  scrollChat();
+  const log = document.getElementById('chat-log');
+  const welcome = log.querySelector('.chat-welcome');
+  if (welcome) {
+    await Motion.leave([welcome], 220);
+    log.replaceChildren();
+  }
 
-  let frame = 0;
-  const paint = () => {
-    if (frame) return;
-    frame = requestAnimationFrame(() => { frame = 0; paintChatMessage(answer); followAnswer(answer); });
-  };
+  const question = { role: 'user', content: text };
+  const answer = { role: 'assistant', content: '', shown: 0, pending: true, live: true, streaming: true, question };
+  Chat.messages.push(question, answer);
+  const qEl = chatMessageEl(question);
+  const aEl = chatMessageEl(answer);
+  if (!from || Motion.reduced) qEl.classList.add('enter');
+  aEl.classList.add('enter');
+  aEl.style.setProperty('--d', '160ms');
+  log.append(qEl, aEl);
+  log.setAttribute('aria-busy', 'true');
+  Chat.follow = true;
+  updateComposer();
+  scrollChat();
+  Motion.flyFrom(qEl.querySelector('.chat-bubble'), from);
+
+  // While waiting, the status line moves on every couple of seconds, so a
+  // slow answer never looks like a stuck one.
+  const asked = Date.now();
+  let step = 0;
+  const status = setInterval(() => {
+    if (!answer.live || answer.shown) return;
+    step++;
+    const next = Date.now() - asked > 14000
+      ? 'Taking a little longer than usual — hang on…'
+      : THINKING[Math.min(step, THINKING.length - 1)];
+    const el = answer.el?.querySelector('.chat-status');
+    answer.status = next;
+    if (!el || el.textContent === next) return;
+    el.textContent = next;
+    Motion.play(el, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 340 });
+  }, 2400);
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), ASSISTANT_TIMEOUT_MS);
@@ -592,7 +896,7 @@ async function sendChat(text) {
       if (ev.type === 'delta') {
         answer.content += ev.text;
         answer.pending = false;
-        paint();
+        revealAnswer(answer);
       } else if (ev.type === 'done') {
         if (typeof ev.remaining === 'number') Chat.remaining = ev.remaining;
       } else if (ev.type === 'error') {
@@ -610,13 +914,14 @@ async function sendChat(text) {
     if (err.code === 'daily_limit') Chat.remaining = 0;
   } finally {
     clearTimeout(timer);
-    if (frame) cancelAnimationFrame(frame);
+    clearInterval(status);
     answer.pending = false;
+    answer.streaming = false;
     Chat.busy = false;
-    paintChatMessage(answer);
     updateComposer();
     document.getElementById('chat-log')?.setAttribute('aria-busy', 'false');
-    followAnswer(answer);
+    // Still letting text out? It settles itself when it catches up.
+    if (!answer.revealing) settleAnswer(answer);
   }
 }
 
@@ -656,12 +961,13 @@ async function readChatStream(body, onEvent) {
 }
 
 // Drops the failed exchange and asks the same question again.
-function retryChat(i) {
-  const failed = Chat.messages[i];
+async function retryChat(failed) {
   if (!failed?.retry || Chat.busy) return;
-  const text = failed.retry;
-  Chat.messages.splice(i - 1, 2);
-  sendChat(text);
+  const i = Chat.messages.indexOf(failed);
+  const pair = Chat.messages.splice(i - 1, 2);
+  await Motion.leave(pair.map(m => m.el).filter(Boolean), 180);
+  pair.forEach(m => m.el?.remove());
+  sendChat(failed.retry);
 }
 
 function resetChat() {
@@ -669,6 +975,7 @@ function resetChat() {
   UI.confirm('Start a new conversation? This one will be deleted.', async () => {
     const { error } = await db.from('ai_chat_messages').delete().eq('user_id', App.user.id);
     if (error) { UI.toast(error.message, 'error'); return; }
+    await Motion.leave(document.getElementById('chat-log')?.children || [], 220);
     Chat.messages = [];
     drawChat();
     document.getElementById('chat-input')?.focus();

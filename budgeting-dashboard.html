@@ -197,7 +197,17 @@
               <button class="btn btn-ghost btn-sm" type="button" id="chat-new" hidden>New chat</button>
             </div>
 
-            <div class="chat-log" id="chat-log" role="log" aria-live="polite"></div>
+            <div class="chat-stage">
+              <div class="chat-log" id="chat-log" role="log" aria-live="polite"></div>
+              <button class="chat-jump" id="chat-jump" type="button" aria-label="Jump to the latest message"
+                tabindex="-1" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <polyline points="19 12 12 19 5 12" />
+                </svg>
+              </button>
+            </div>
 
             <form class="chat-composer" id="chat-form" autocomplete="off">
               <textarea class="chat-input" id="chat-input" rows="1" maxlength="2000"

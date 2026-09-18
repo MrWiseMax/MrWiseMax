@@ -2,6 +2,12 @@
    MrWiseMax — Assistant
    ============================================================ */
 
+/* Motion on this page shares the app's easing curve (--ease-out). Things that
+   land — the avatar, the send button — use a spring with a slight overshoot. */
+:root {
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
 /* The page is exactly one screen tall (see _applyLayout), so the conversation
    scrolls inside it and the box you type into stays at the bottom. */
 #section-assistant.active {
@@ -24,7 +30,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .chat-head .section-title {
@@ -47,6 +53,15 @@
 }
 
 /* ── Conversation ────────────────────────────────────────── */
+/* Holds the log and the floating jump button above it. */
+.chat-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-log {
   /* The reference point for each message's offsetTop, which the auto-scroll
      that keeps a question in view is measured from. */
@@ -58,23 +73,22 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 4px 2px 18px;
+  padding: 12px 2px 18px;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
+  /* Messages fade out as they scroll under the page header, rather than being
+     cut off by a hard edge. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
+          mask-image: linear-gradient(to bottom, transparent 0, #000 14px);
 }
 
 .chat-log::-webkit-scrollbar { width: 6px; }
 .chat-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-.chat-loading {
-  margin: auto;
-}
-
 .chat-msg {
   display: flex;
   gap: 10px;
   min-width: 0;
-  animation: rise 0.3s var(--ease-out) both;
 }
 
 .chat-msg.user {
@@ -96,6 +110,7 @@
   border: 1px solid rgba(187, 136, 95, 0.3);
   border-radius: 16px 16px 4px 16px;
   white-space: pre-wrap;
+  will-change: transform;
 }
 
 .chat-msg.bot .chat-bubble {
@@ -104,13 +119,22 @@
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 4px 16px 16px 16px;
+  transition: border-color 0.7s var(--ease-out), box-shadow 0.7s var(--ease-out);
+}
+
+/* While an answer is being written its card carries a warm edge, which fades
+   back to normal once it is complete. */
+.chat-msg.bot.live .chat-bubble {
+  border-color: rgba(187, 136, 95, 0.34);
+  box-shadow: 0 0 0 3px rgba(187, 136, 95, 0.06);
 }
 
 .chat-msg.bot.error .chat-bubble {
-  border-color: rgba(244, 67, 54, 0.3);
+  border-color: rgba(244, 67, 54, 0.32);
 }
 
 .chat-avatar {
+  position: relative;
   flex-shrink: 0;
   width: 30px;
   height: 30px;
@@ -124,14 +148,63 @@
   background: linear-gradient(135deg, var(--primary), var(--secondary));
 }
 
+/* A ring that turns around the avatar while it is thinking and writing. */
+.chat-avatar::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 55%, var(--primary-lt) 80%, transparent 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+          mask: radial-gradient(farthest-side, transparent calc(100% - 2px), #000 calc(100% - 2px));
+  opacity: 0;
+  transition: opacity 0.5s var(--ease-out);
+}
+
+/* Only the answer being written spins — a long conversation of avatars is not
+   left turning invisibly in the background. */
+.chat-msg.live .chat-avatar::before {
+  opacity: 1;
+  animation: spin 1.1s linear infinite;
+}
+
+/* ── Arrivals ─────────────────────────────────────────────── */
+/* Only messages that have just been added carry .enter; redrawing the page
+   never replays them. --d staggers several arriving together. */
+.chat-msg.enter {
+  animation: chat-rise 0.46s var(--ease-out) both;
+  animation-delay: var(--d, 0ms);
+}
+
+.chat-msg.bot.enter .chat-avatar {
+  animation: chat-pop 0.55s var(--spring) both;
+  animation-delay: calc(var(--d, 0ms) + 90ms);
+}
+
+@keyframes chat-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes chat-pop {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ── Thinking ────────────────────────────────────────────── */
 .chat-typing {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 10px;
   padding: 3px 0;
 }
 
-.chat-typing span {
+.chat-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.chat-dots i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -139,19 +212,70 @@
   animation: chat-dot 1.2s infinite ease-in-out;
 }
 
-.chat-typing span:nth-child(2) { animation-delay: 0.15s; }
-.chat-typing span:nth-child(3) { animation-delay: 0.3s; }
-
-.chat-typing em {
-  margin-left: 8px;
-  font-style: normal;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-}
+.chat-dots i:nth-child(2) { animation-delay: 0.15s; }
+.chat-dots i:nth-child(3) { animation-delay: 0.3s; }
 
 @keyframes chat-dot {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
-  40%           { opacity: 1;    transform: translateY(-3px); }
+  40%           { opacity: 1;    transform: translateY(-4px); }
+}
+
+/* The status line has a band of light sweeping across it. */
+.chat-status {
+  font-style: normal;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 40%, #fff 50%,
+    var(--text-muted) 60%, var(--text-muted) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+          background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: chat-shimmer 2.2s linear infinite;
+}
+
+@keyframes chat-shimmer {
+  from { background-position: 100% 0; }
+  to   { background-position: -150% 0; }
+}
+
+/* ── Writing ─────────────────────────────────────────────── */
+/* A soft pulsing dot after the last word, while more is on its way. */
+.chat-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-left: 5px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--primary-lt);
+  box-shadow: 0 0 10px rgba(212, 165, 116, 0.6);
+  animation: chat-caret 1s ease-in-out infinite;
+}
+
+@keyframes chat-caret {
+  0%, 100% { opacity: 0.35; transform: scale(0.75); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+
+/* Each new block of an answer — a paragraph, a list item, a row — eases in as
+   it arrives. Table rows only fade: moving a row would misalign its cells. */
+.md .md-in {
+  animation: md-in 0.36s var(--ease-out) both;
+}
+
+.md tr.md-in {
+  animation-name: md-fade;
+}
+
+@keyframes md-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes md-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .chat-error {
@@ -285,11 +409,85 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+.md tbody tr {
+  transition: background 0.2s ease;
+}
+
+@media (hover: hover) {
+  .md tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+}
+
+/* ── Loading ─────────────────────────────────────────────── */
+/* Placeholder shapes in the conversation's own layout, with a sheen passing
+   over them, while the history loads. */
+.chat-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 4px;
+}
+
+.sk-row {
+  display: flex;
+  gap: 10px;
+}
+
+.sk-row.user {
+  justify-content: flex-end;
+}
+
+.sk-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 4px 16px 16px 16px;
+  border: 1px solid var(--border);
+}
+
+.sk,
+.sk-dot {
+  display: block;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.09) 50%,
+    rgba(255, 255, 255, 0.04) 100%);
+  background-size: 200% 100%;
+  animation: sk-sheen 1.3s ease-in-out infinite;
+}
+
+.sk-row.user .sk {
+  height: 38px;
+  border-radius: 16px 16px 4px 16px;
+}
+
+.sk-lines .sk {
+  height: 10px;
+}
+
+.sk-dot {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+
+@keyframes sk-sheen {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+
 /* ── Empty conversation ──────────────────────────────────── */
 .chat-welcome {
   margin: auto 0;
   padding: 18px 6px;
   text-align: center;
+}
+
+/* Every piece of the welcome rises in turn; --k is its place in the order. */
+.chat-welcome [style*="--k"] {
+  animation: chat-rise 0.6s var(--ease-out) both;
+  animation-delay: calc(var(--k) * 55ms + 40ms);
 }
 
 .chat-welcome-icon {
@@ -306,6 +504,16 @@
   box-shadow: 0 8px 28px rgba(187, 136, 95, 0.25);
 }
 
+/* The icon springs in, then breathes a slow glow. */
+.chat-welcome .chat-welcome-icon[style*="--k"] {
+  animation: chat-pop 0.7s var(--spring) both, chat-glow 3.4s ease-in-out 0.8s infinite;
+}
+
+@keyframes chat-glow {
+  0%, 100% { box-shadow: 0 8px 28px rgba(187, 136, 95, 0.22); }
+  50%      { box-shadow: 0 8px 38px rgba(187, 136, 95, 0.5), 0 0 0 6px rgba(187, 136, 95, 0.07); }
+}
+
 .chat-welcome h2 {
   font-size: 1.15rem;
   font-weight: 700;
@@ -314,28 +522,96 @@
 
 .chat-welcome p {
   max-width: 470px;
-  margin: 0 auto 14px;
+  margin: 0 auto 16px;
   font-size: 0.88rem;
   line-height: 1.55;
   color: var(--text-muted);
 }
 
-.chat-seen {
+/* What the assistant can see: the balance, and money in against money out as
+   two bars that grow in while their figures count up. */
+.chat-snapshot {
+  max-width: 440px;
+  margin: 0 auto 18px;
+  padding: 12px 16px;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px;
-  margin-bottom: 18px;
-}
-
-.chat-seen span {
-  padding: 4px 11px;
-  border-radius: 100px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--text-muted);
+  flex-direction: column;
+  gap: 9px;
+  text-align: left;
+  border-radius: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border);
+}
+
+.snap-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.snap-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.snap-meta {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.snap-val {
+  font-size: 0.86rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.snap-balance .snap-val {
+  font-size: 0.95rem;
+}
+
+.snap-val small {
+  margin-left: 1px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.snap-val em {
+  font-style: normal;
+  font-weight: 500;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+
+.snap-bar {
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.snap-bar i {
+  display: block;
+  height: 100%;
+  width: var(--w);
+  border-radius: 4px;
+  transform-origin: left center;
+  animation: snap-grow 1.1s var(--ease-out) both;
+  animation-delay: calc(var(--k, 0) * 55ms + 240ms);
+}
+
+.snap-bar i.in  { background: linear-gradient(90deg, rgba(76, 175, 80, 0.55), var(--success)); }
+.snap-bar i.out { background: linear-gradient(90deg, var(--secondary), var(--primary-lt)); }
+
+@keyframes snap-grow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
 }
 
 .chat-suggest {
@@ -357,21 +633,66 @@
   line-height: 1.4;
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--ease), background var(--ease), transform var(--ease);
+  transition: border-color var(--ease), background var(--ease), transform 0.25s var(--spring),
+    box-shadow 0.25s var(--ease-out);
 }
 
 @media (hover: hover) {
   .chat-chip:hover {
     border-color: rgba(187, 136, 95, 0.45);
     background: var(--bg-hover);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
   }
+}
+
+.chat-chip:active {
+  transform: scale(0.97);
+}
+
+/* The one that was tapped lights up as the rest fade away. */
+.chat-chip.picked {
+  border-color: var(--primary);
+  background: rgba(187, 136, 95, 0.14);
 }
 
 .chat-welcome .chat-privacy {
   margin: 16px auto 0;
   font-size: 0.72rem;
   color: var(--text-dim);
+}
+
+/* ── Jump to latest ──────────────────────────────────────── */
+.chat-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border-md);
+  background: var(--bg-card2);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translate(-50%, 12px) scale(0.85);
+  pointer-events: none;
+  transition: opacity 0.25s var(--ease-out), transform 0.35s var(--spring), border-color var(--ease);
+}
+
+.chat-jump.show {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+  pointer-events: auto;
+}
+
+@media (hover: hover) {
+  .chat-jump:hover { border-color: var(--primary); }
 }
 
 /* ── Composer ────────────────────────────────────────────── */
@@ -383,11 +704,12 @@
   border-radius: 16px;
   border: 1px solid var(--border-md);
   background: var(--bg-card);
-  transition: border-color var(--ease);
+  transition: border-color 0.25s ease, box-shadow 0.3s var(--ease-out);
 }
 
 .chat-composer:focus-within {
   border-color: rgba(187, 136, 95, 0.55);
+  box-shadow: 0 0 0 4px rgba(187, 136, 95, 0.1), 0 10px 30px rgba(0, 0, 0, 0.22);
 }
 
 .chat-input {
@@ -410,6 +732,7 @@
 }
 
 .chat-send {
+  position: relative;
   flex-shrink: 0;
   width: 36px;
   height: 36px;
@@ -418,19 +741,70 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
   color: #fff;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
+  box-shadow: 0 4px 14px rgba(187, 136, 95, 0.35);
   cursor: pointer;
-  transition: opacity var(--ease), transform var(--ease);
+  transition: opacity 0.2s ease, transform 0.35s var(--spring), box-shadow 0.25s ease;
 }
 
+/* Nothing to send: the button sinks back and dims; typing brings it forward. */
 .chat-send:disabled {
   opacity: 0.35;
+  transform: scale(0.86);
+  box-shadow: none;
   cursor: default;
 }
 
 @media (hover: hover) {
   .chat-send:not(:disabled):hover { transform: translateY(-1px); }
+}
+
+/* On send, the arrow shoots up out of the button and comes back in from below. */
+.chat-send.launch svg {
+  animation: chat-launch 0.5s var(--ease-out);
+}
+
+@keyframes chat-launch {
+  0%   { transform: none;              opacity: 1; }
+  40%  { transform: translateY(-20px); opacity: 0; }
+  41%  { transform: translateY(18px);  opacity: 0; }
+  100% { transform: none;              opacity: 1; }
+}
+
+/* While an answer is on its way the arrow gives way to a small spinner — after
+   the launch has had time to play. */
+.chat-send svg {
+  transition: opacity 0.15s ease;
+}
+
+.chat-send::after {
+  content: '';
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  animation: spin 0.7s linear infinite;
+}
+
+.chat-composer.busy .chat-send:disabled {
+  opacity: 0.8;
+  transform: none;
+}
+
+.chat-composer.busy .chat-send svg {
+  opacity: 0;
+  transition-delay: 0.45s;
+}
+
+.chat-composer.busy .chat-send::after {
+  opacity: 1;
+  transition-delay: 0.45s;
 }
 
 .chat-foot {
@@ -444,23 +818,45 @@
 /* ── Phones ──────────────────────────────────────────────── */
 @media (max-width: 640px) {
   .chat-subtitle { display: none; }
-  .chat-head { margin-bottom: 8px; align-items: center; }
+  .chat-head { margin-bottom: 4px; align-items: center; }
   .chat-head .btn { margin-top: 0; }
 
   /* Every pixel of width goes to the answer. */
   .chat-avatar { display: none; }
   .chat-msg.bot .chat-bubble { padding: 11px 13px; border-radius: 14px; }
   .chat-msg.user .chat-bubble { max-width: 88%; }
+  .sk-dot { display: none; }
 
   .chat-suggest { grid-template-columns: 1fr; }
   .chat-welcome { padding: 8px 0; }
   .chat-welcome p { font-size: 0.84rem; }
+  .chat-snapshot { padding: 11px 13px; }
+  .snap-row { grid-template-columns: 74px minmax(0, 1fr) auto; gap: 10px; }
 
   /* 16px stops iOS zooming the page in when the box is tapped. */
   .chat-input { font-size: 16px; }
 }
 
+/* ── Less motion ─────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .chat-msg,
-  .chat-typing span { animation: none; }
+  .chat-msg.enter,
+  .chat-msg.bot.enter .chat-avatar,
+  .chat-welcome [style*="--k"],
+  .chat-welcome .chat-welcome-icon[style*="--k"],
+  .snap-bar i,
+  .md .md-in,
+  .chat-send.launch svg,
+  .chat-dots i,
+  .chat-caret,
+  .chat-status,
+  .sk,
+  .sk-dot,
+  .chat-avatar::before {
+    animation: none;
+  }
+
+  .chat-status {
+    -webkit-text-fill-color: currentColor;
+    background: none;
+  }
 }

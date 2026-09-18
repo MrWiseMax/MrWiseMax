@@ -8,9 +8,10 @@
 // once the answer is complete.
 //
 // Secrets (Supabase Dashboard → Edge Functions → Secrets):
-//   GEMINI_API_KEY   required — from Google AI Studio
-//   GEMINI_MODELS    optional — comma-separated, tried in order
-//   AI_DAILY_LIMIT   optional — questions per person per day (UTC)
+//   GEMINI_API_KEY     required — from Google AI Studio
+//   GEMINI_MODELS      optional — comma-separated, tried in order
+//   GEMINI_TIMEOUT_MS  optional — longest wait for one model to start answering
+//   AI_DAILY_LIMIT     optional — questions per person per day (UTC)
 // SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are provided
 // by Supabase automatically.
 
@@ -20,6 +21,7 @@ type Env = {
   SUPABASE_SERVICE_ROLE_KEY: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODELS?: string;
+  GEMINI_TIMEOUT_MS?: string;
   AI_DAILY_LIMIT?: string;
 };
 
@@ -27,10 +29,25 @@ type Fetch = typeof fetch;
 type Turn = { role: 'user' | 'model'; parts: { text: string }[] };
 type Stored = { role: 'user' | 'assistant'; content: string };
 
-// Newest first. Each model has its own free-tier quota, so when one is busy or
-// retired the next one answers instead of the user seeing an error.
-const DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
+// Most capable first. Each model has its own free-tier quota and its own load,
+// so when one is busy or retired the next one answers instead of the user
+// seeing an error. The Flash-Lite models close the list because they are the
+// ones most likely to have room when every larger model is overloaded.
+const DEFAULT_MODELS = [
+  'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash',
+  'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite',
+];
+// How long one model gets to start answering. An overloaded model has been
+// seen to take over two minutes just to say so, which is far too long to leave
+// someone looking at a typing indicator.
+const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_DAILY_LIMIT = 30;
+
+// A model that says it is overloaded, or does not start in time, is skipped by
+// every request for a while (see the ai_model_rest table), so one slow refusal
+// spares everyone else the wait. A retired model is skipped for a day.
+const REST_BUSY_MS = 10 * 60_000;
+const REST_GONE_MS = 24 * 3_600_000;
 const HISTORY_MESSAGES = 30;     // earlier messages sent along with each question
 const MAX_QUESTION = 2000;       // characters
 const MAX_FIGURES = 150_000;     // characters of JSON
@@ -51,12 +68,13 @@ Your purpose: help this person understand where they stand and decide what to do
 2. Understand what they actually need. People often ask a surface question ("can I afford a holiday?") when the real need is broader (a safety buffer, a spending plan). When the goal is unclear or a key fact is missing — how much, by when, what matters most, what cannot change — ask up to 3 short, specific questions. Always pair them with your best initial read from the data, so the reply is useful on its own. Never ask for something the data already tells you. If the goal is clear, skip the questions and answer.
 3. Give guidance they can act on. Put the few moves with the biggest effect first, in order. For each: what to do, how much it frees up or costs (per month and per year), and what it changes (monthly surplus, the date money runs short, months to reach the goal). Be honest about the trade-off. Refer to their actual expenses, groups and accounts by name.
 4. Get the numbers right. Use the app's figures as given. When you work out something new (a goal timeline, the effect of cutting or adding a cost, a debt payoff), show the working briefly — e.g. "Rp20,000,000 ÷ Rp2,500,000 a month = 8 months, so by May 2027". Never invent figures: if you need one, ask for it or state your assumption plainly.
-5. Notice what they might miss, and raise it briefly when it matters: a month where money runs short, a large yearly charge coming up, no emergency buffer (a common target is 3–6 months of expenses), income not recorded, a balance not confirmed recently, costs in a foreign currency, one expense taking a large share, a loan ending soon that will free up money.
-6. Recorded expenses are usually bills and subscriptions, not everyday spending like food, fuel or shopping. Unless those appear in the data, the monthly surplus overstates what is really left — say so and ask roughly what they spend day to day before building a savings plan on it.
-7. Keep things moving: when it helps, end with one natural next step or question — not every time.
+5. Build timelines from their real trajectory, not a flat average: start from the money already in their accounts (totals.balance_now), add what is left each month, and account for anything that ends or begins along the way — an expense with an ends_on date stops costing them from then, which frees that amount every month after it. Never plan for their balance to hit zero; keep a safety buffer in the plan.
+6. Notice what they might miss, and raise it briefly when it matters: a month where money runs short, a large yearly charge coming up, no emergency buffer (a common target is 3–6 months of expenses), income not recorded, a balance not confirmed recently, costs in a foreign currency, one expense taking a large share, a loan ending soon that will free up money.
+7. Recorded expenses are usually bills and subscriptions, not everyday spending like food, fuel or shopping. Unless those appear in the data, the monthly surplus overstates what is really left — say so and ask roughly what they spend day to day before building a savings plan on it.
+8. Keep things moving: when it helps, end with one natural next step or question — not every time.
 
 # Style
-- Reply in the language of the user's latest message (Indonesian → Indonesian, Arabic → Arabic, and so on).
+- Always reply in the language of the user's latest message. The currency, the country, or the language of their account and expense names never changes this: a question written in English gets an English answer even when every amount is in rupiah, and one written in Indonesian or Arabic gets an answer in Indonesian or Arabic.
 - Money in the currency given in currency.code, formatted the way the app does: symbol, thousands separators, no decimals — e.g. Rp3,200,000 or $1,250.
 - Dates like 1 Oct 2026.
 - Lead with the answer. Be warm, plain-spoken and concise: short paragraphs, bullet or numbered steps, **bold** for the key numbers. Use a small table only to compare options side by side. Most replies should be under 200 words; go longer only for a full plan or when asked.
@@ -113,10 +131,22 @@ export async function handle(req: Request, env: Env, http: Fetch = fetch): Promi
     return fail(500, 'storage', 'The assistant could not load your conversation. Try again.');
   }
 
+  // Not knowing which models are resting only costs time, never an answer.
+  const resting = await store.resting().catch(e => {
+    console.error('[ai-chat] model rest:', (e as Error).message);
+    return new Map<string, number>();
+  });
+  const rest = async (model: string, ms: number) => {
+    resting.set(model, Date.now() + ms);
+    await store.rest(model, Date.now() + ms)
+      .catch(e => console.error('[ai-chat] model rest:', (e as Error).message));
+  };
+
   const askedAt = new Date().toISOString();
   const models = (env.GEMINI_MODELS || '').split(',').map(s => s.trim()).filter(Boolean);
   const upstream = await callGemini(buildRequest(history, question, figures),
-    models.length ? models : DEFAULT_MODELS, env.GEMINI_API_KEY, http);
+    models.length ? models : DEFAULT_MODELS, env.GEMINI_API_KEY, http,
+    parseInt(env.GEMINI_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS, resting, rest);
   if (!upstream.ok) return fail(upstream.status, upstream.code, upstream.message);
 
   const stream = relay(upstream.body, async answer => {
@@ -200,6 +230,21 @@ function database(env: Env, http: Fetch) {
       })).json();
       return typeof used === 'number' ? used : 0;
     },
+
+    // Models still resting, and until when.
+    async resting(): Promise<Map<string, number>> {
+      const now = new Date().toISOString();
+      const rows = await (await call(`/ai_model_rest?select=model,until&until=gt.${encodeURIComponent(now)}`)).json();
+      return new Map((rows || []).map((r: { model: string; until: string }) => [r.model, Date.parse(r.until)]));
+    },
+
+    async rest(model: string, until: number) {
+      await call('/ai_model_rest?on_conflict=model', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ model, until: new Date(until).toISOString() }]),
+      });
+    },
   };
 }
 
@@ -229,14 +274,30 @@ type Upstream =
   | { ok: true; body: ReadableStream<Uint8Array>; model: string }
   | { ok: false; status: number; code: string; message: string };
 
-async function callGemini(payload: unknown, models: string[], apiKey: string, http: Fetch): Promise<Upstream> {
+// Resting models go to the back of the queue rather than out of it, so if
+// every other model fails too they still get their turn.
+export function queue(models: string[], resting: Map<string, number>): string[] {
+  const now = Date.now();
+  const ready = models.filter(m => (resting.get(m) || 0) <= now);
+  return [...ready, ...models.filter(m => !ready.includes(m))];
+}
+
+async function callGemini(payload: unknown, models: string[], apiKey: string, http: Fetch,
+                          timeoutMs: number, resting: Map<string, number>,
+                          rest: (model: string, ms: number) => Promise<void>): Promise<Upstream> {
+  const busy: Upstream = { ok: false, status: 503, code: 'busy',
+    message: 'The assistant is very busy right now. Try again in a minute.' };
   let last: Upstream = {
     ok: false, status: 502, code: 'upstream',
     message: 'The assistant could not answer just now. Try again in a moment.',
   };
   const body = JSON.stringify(payload);
 
-  for (const model of models) {
+  for (const model of queue(models, resting)) {
+    // Only the wait for the answer to start is limited. The timer is cleared
+    // as soon as it does, so a long answer is never cut off part-way.
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), timeoutMs);
     let res: Response;
     try {
       res = await http(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}` +
@@ -244,19 +305,34 @@ async function callGemini(payload: unknown, models: string[], apiKey: string, ht
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
         body,
+        signal: abort.signal,
       });
     } catch (e) {
-      console.error(`[ai-chat] ${model}: ${(e as Error).message}`);
+      clearTimeout(timer);
+      const timedOut = abort.signal.aborted;
+      console.error(`[ai-chat] ${model}: ${timedOut ? `no answer within ${timeoutMs}ms` : (e as Error).message}`);
+      if (timedOut) { await rest(model, REST_BUSY_MS); last = busy; }
       continue;
     }
-    if (res.ok && res.body) return { ok: true, body: res.body, model };
+    clearTimeout(timer);
+    if (res.ok && res.body) {
+      // A resting model that answered anyway is back: stop skipping it.
+      if ((resting.get(model) || 0) > Date.now()) await rest(model, 0);
+      return { ok: true, body: res.body, model };
+    }
 
     const detail = await res.text().catch(() => '');
     console.error(`[ai-chat] ${model} -> ${res.status} ${detail.slice(0, 400)}`);
 
-    if (res.status === 429) {
-      last = { ok: false, status: 503, code: 'busy',
-        message: 'The assistant is at capacity right now. Try again in a minute.' };
+    // Over quota or overloaded: this model needs a break, another may not.
+    if (res.status === 429 || res.status === 503) {
+      await rest(model, REST_BUSY_MS);
+      last = busy;
+      continue;
+    }
+    // Retired, or never offered to this key.
+    if (res.status === 404) {
+      await rest(model, REST_GONE_MS);
       continue;
     }
     // A rejected key or an unsupported location fails the same way on every
@@ -361,6 +437,7 @@ if (typeof Deno !== 'undefined') {
     SUPABASE_SERVICE_ROLE_KEY: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'),
     GEMINI_API_KEY: Deno.env.get('GEMINI_API_KEY'),
     GEMINI_MODELS: Deno.env.get('GEMINI_MODELS'),
+    GEMINI_TIMEOUT_MS: Deno.env.get('GEMINI_TIMEOUT_MS'),
     AI_DAILY_LIMIT: Deno.env.get('AI_DAILY_LIMIT'),
   }));
 }

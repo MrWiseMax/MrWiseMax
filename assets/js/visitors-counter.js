@@ -36,10 +36,9 @@
       },
       body:      '{}',
       keepalive: true,
-    })
-      .then(r => (r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status))))
-      .then(total => console.log('[Visitors] Counted this visit. Month total:', total))
-      .catch(err  => console.warn('[Visitors] Could not count this visit:', err.message));
+    // Silent either way: the visitor has no use for the running total, and a
+    // missed count is not worth a message in their console.
+    }).catch(() => {});
   }
 
   countVisit();

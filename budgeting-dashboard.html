@@ -187,14 +187,56 @@
            SECTION: ASSISTANT
       ═══════════════════════════════════════ -->
         <section class="dash-section" id="section-assistant">
+          <div class="assistant" id="assistant">
+          <!-- Every conversation, saved. A column beside the chat on a wide
+               screen; a panel that slides in over it on anything narrower. -->
+          <aside class="chat-side" id="chat-side" aria-label="Your chats">
+            <div class="chat-side-head">
+              <button class="chat-side-new" id="chat-side-new" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                New chat
+              </button>
+              <button class="chat-icon-btn chat-side-close" id="chat-side-close" type="button"
+                aria-label="Close your chats">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div class="chat-list" id="chat-list"></div>
+          </aside>
+          <div class="chat-scrim" id="chat-scrim" aria-hidden="true"></div>
+
           <div class="chat">
             <div class="chat-head">
-              <div>
+              <button class="chat-icon-btn chat-side-open" id="chat-side-open" type="button"
+                aria-label="Your chats" aria-controls="chat-side" aria-expanded="false">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+                  <polyline points="3 3 3 8 8 8" />
+                  <polyline points="12 7 12 12 15 14" />
+                </svg>
+              </button>
+              <div class="chat-head-text">
                 <h1 class="section-title">Assistant</h1>
-                <p class="section-subtitle chat-subtitle">Knows your balances, income and expenses &mdash;
-                  ask it anything about your money.</p>
+                <p class="section-subtitle chat-subtitle" id="chat-subtitle">Knows your balances, income and
+                  expenses &mdash; ask it anything about your money.</p>
               </div>
-              <button class="btn btn-ghost btn-sm" type="button" id="chat-new" hidden>New chat</button>
+              <button class="btn btn-ghost btn-sm chat-new" type="button" id="chat-new">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"
+                  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                New chat
+              </button>
             </div>
 
             <div class="chat-stage">
@@ -221,6 +263,7 @@
               </button>
             </form>
             <p class="chat-foot" id="chat-foot"></p>
+          </div>
           </div>
         </section>
 

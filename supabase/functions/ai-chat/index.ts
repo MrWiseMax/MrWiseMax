@@ -2,16 +2,18 @@
 // MrWiseMax — Assistant (Supabase Edge Function: ai-chat)
 // ============================================================
 // The browser never holds the Gemini key. It posts a question together with a
-// snapshot of the figures already on the user's screen; this function checks
-// who is asking, keeps each person to a daily allowance, adds the conversation
-// so far, and streams Gemini's answer back as it is written — saving both sides
-// once the answer is complete.
+// snapshot of the figures already on the user's screen, and the conversation it
+// belongs to (none for a new one); this function checks who is asking, takes one
+// message from their daily allowance, adds that conversation so far, and streams
+// Gemini's answer back as it is written — saving both sides once the answer is
+// complete, and starting the conversation then if it is new. A question that
+// gets no answer gives its message back.
 //
 // Secrets (Supabase Dashboard → Edge Functions → Secrets):
 //   GEMINI_API_KEY     required — from Google AI Studio
 //   GEMINI_MODELS      optional — comma-separated, tried in order
 //   GEMINI_TIMEOUT_MS  optional — longest wait for one model to start answering
-//   AI_DAILY_LIMIT     optional — questions per person per day (UTC)
+//   AI_DAILY_LIMIT     optional — messages per person per day (UTC)
 // SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are provided
 // by Supabase automatically.
 
@@ -28,6 +30,7 @@ type Env = {
 type Fetch = typeof fetch;
 type Turn = { role: 'user' | 'model'; parts: { text: string }[] };
 type Stored = { role: 'user' | 'assistant'; content: string };
+type Chat = { id: string; title: string; named: boolean; pinned: boolean; created_at: string; updated_at: string };
 
 // Most capable first. Each model has its own free-tier quota and its own load,
 // so when one is busy or retired the next one answers instead of the user
@@ -41,7 +44,9 @@ const DEFAULT_MODELS = [
 // seen to take over two minutes just to say so, which is far too long to leave
 // someone looking at a typing indicator.
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_DAILY_LIMIT = 30;
+// Keep in step with ASSISTANT_DAILY_LIMIT in assets/js/budgeting-assistant.js,
+// which shows the count before the first question of the day.
+const DEFAULT_DAILY_LIMIT = 5;
 
 // A model that says it is overloaded, or does not start in time, is skipped by
 // every request for a while (see the ai_model_rest table), so one slow refusal
@@ -51,6 +56,8 @@ const REST_GONE_MS = 24 * 3_600_000;
 const HISTORY_MESSAGES = 30;     // earlier messages sent along with each question
 const MAX_QUESTION = 2000;       // characters
 const MAX_FIGURES = 150_000;     // characters of JSON
+const CHAT_FIELDS = 'id,title,named,pinned,created_at,updated_at';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -59,11 +66,21 @@ const CORS = {
 };
 
 // ── What the assistant is told ───────────────────────────────
-export const SYSTEM_PROMPT = `You are the MrWiseMax assistant — a sharp, friendly personal-finance coach built into MrWiseMax, a budgeting app. The person talking to you has entered their bank balances, recurring expenses and recurring income into the app. All of it is included at the end of these instructions as JSON, already calculated by the app, so you know their cash flow before they say a word.
+export const SYSTEM_PROMPT = `You are the MrWiseMax Assistant — a sharp, friendly personal-finance coach built into MrWiseMax, a budgeting app. The person talking to you has entered their bank balances, recurring expenses and recurring income into the app. All of it is included at the end of these instructions as JSON, already calculated by the app, so you know their cash flow before they say a word.
 
 Your purpose: help this person understand where they stand and decide what to do next to get what they want — then show them exactly how, using their own numbers.
 
-# How to think about every reply
+# First, match the reply to the message
+Answer what was actually asked, at the length it calls for. Knowing their figures does not mean every reply should quote them.
+- A greeting ("hi", "hello", "salam"), thanks, small talk, or a question about you: reply the way a person would, in one or two short sentences. Do not quote their figures, sum up their finances or give advice they did not ask for. After a greeting, say in a few words what you can help with — for example, whether their money lasts until payday, where they could cut back, or planning for a goal — and ask what they would like to look at.
+- A quick question about their money ("what's my balance?", "when do I get paid next?"): answer it directly in a sentence or two, with the figure. Add one short note only if something important is closely tied to it.
+- A question that needs thought — a plan, a decision, a goal, a problem: work through it as described below.
+
+# About you
+- You are the MrWiseMax Assistant, the AI assistant built into MrWiseMax to help people with their money. If asked your name, that is it.
+- If asked who made you, which AI or model you are, or what technology you run on: say you are the MrWiseMax Assistant, built into MrWiseMax, and that you can't share details about the technology behind it. Do not name any AI company, model or product in connection with yourself. Never claim to be human.
+
+# How to think about a money question
 1. Know their position first. Before advising, read the figures: money now, monthly income against monthly spending, what is left each month, whether and when money runs short (coverage and month_by_month), the biggest costs and groups, anything ending soon, and notes_for_assistant.
 2. Understand what they actually need. People often ask a surface question ("can I afford a holiday?") when the real need is broader (a safety buffer, a spending plan). When the goal is unclear or a key fact is missing — how much, by when, what matters most, what cannot change — ask up to 3 short, specific questions. Always pair them with your best initial read from the data, so the reply is useful on its own. Never ask for something the data already tells you. If the goal is clear, skip the questions and answer.
 3. Give guidance they can act on. Put the few moves with the biggest effect first, in order. For each: what to do, how much it frees up or costs (per month and per year), and what it changes (monthly surplus, the date money runs short, months to reach the goal). Be honest about the trade-off. Refer to their actual expenses, groups and accounts by name.
@@ -114,20 +131,42 @@ export async function handle(req: Request, env: Env, http: Fetch = fetch): Promi
   const figures = JSON.stringify(body?.context && typeof body.context === 'object' ? body.context : {});
   if (figures.length > MAX_FIGURES) return fail(413, 'too_big', 'There are too many entries to send in one question.');
 
+  // The conversation this question continues; none starts a new one.
+  const chatId = body?.chat == null || body.chat === '' ? null : String(body.chat);
+  if (chatId !== null && !UUID.test(chatId)) return fail(400, 'bad_request', 'That conversation could not be found.');
+
   if (!env.GEMINI_API_KEY) return fail(503, 'not_configured', 'The assistant has not been switched on yet.');
 
   const store = database(env, http);
   const limit = Math.max(1, parseInt(env.AI_DAILY_LIMIT || '', 10) || DEFAULT_DAILY_LIMIT);
+  const day = new Date().toISOString().slice(0, 10);
 
-  let history: Stored[];
+  let chat: Chat | null = null;
+  let used: number;
   try {
-    if (await store.usedToday(user.id) >= limit) {
-      return fail(429, 'daily_limit',
-        `That's all ${limit} questions for today. Your allowance resets at midnight UTC.`, { limit });
+    if (chatId) {
+      chat = await store.chat(user.id, chatId);
+      if (!chat) return fail(404, 'chat_gone', 'This conversation has been deleted. Start a new chat to carry on.');
     }
-    history = await store.history(user.id);
+    used = await store.take(user.id, day, limit);
   } catch (e) {
     console.error('[ai-chat] database:', (e as Error).message);
+    return fail(500, 'storage', 'The assistant could not load your conversation. Try again.');
+  }
+  if (used < 0) {
+    return fail(429, 'daily_limit', `You've used all ${limit} of today's messages. More arrive at midnight UTC.`,
+      { limit, resets_at: nextUtcMidnight() });
+  }
+  // Anything that ends without an answer hands the message back.
+  const giveBack = () => store.giveBack(user.id, day)
+    .catch(e => console.error('[ai-chat] giving back:', (e as Error).message));
+
+  let history: Stored[] = [];
+  try {
+    if (chat) history = await store.history(chat.id);
+  } catch (e) {
+    console.error('[ai-chat] database:', (e as Error).message);
+    await giveBack();
     return fail(500, 'storage', 'The assistant could not load your conversation. Try again.');
   }
 
@@ -147,13 +186,19 @@ export async function handle(req: Request, env: Env, http: Fetch = fetch): Promi
   const upstream = await callGemini(buildRequest(history, question, figures),
     models.length ? models : DEFAULT_MODELS, env.GEMINI_API_KEY, http,
     parseInt(env.GEMINI_TIMEOUT_MS || '', 10) || DEFAULT_TIMEOUT_MS, resting, rest);
-  if (!upstream.ok) return fail(upstream.status, upstream.code, upstream.message);
+  if (!upstream.ok) {
+    await giveBack();
+    return fail(upstream.status, upstream.code, upstream.message);
+  }
 
   const stream = relay(upstream.body, async answer => {
-    await store.save(user.id, question, askedAt, answer, upstream.model);
-    const used = await store.count(user.id);
-    return Math.max(0, limit - used);
-  });
+    // The answer has been read either way, so the message stays spent even
+    // if storing it fails; the browser is then told there is no chat to add.
+    let saved: Chat | null = null;
+    try { saved = await store.save(user.id, chat, question, askedAt, answer, upstream.model); }
+    catch (e) { console.error('[ai-chat] saving:', (e as Error).message); }
+    return { remaining: Math.max(0, limit - used), limit, chat: saved };
+  }, giveBack);
   return new Response(stream, {
     headers: { ...CORS, 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' },
   });
@@ -163,6 +208,30 @@ function fail(status: number, code: string, message: string, extra: Record<strin
   return new Response(JSON.stringify({ code, message, ...extra }), {
     status, headers: { ...CORS, 'Content-Type': 'application/json' },
   });
+}
+
+function nextUtcMidnight(): string {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)).toISOString();
+}
+
+// ── Naming a conversation ────────────────────────────────────
+// A chat is named after its first question: the first sentence when that says
+// enough on its own, otherwise the whole question, cut to a readable length.
+// The browser shows the same name the moment a new chat is asked, before this
+// one arrives, so assets/js/budgeting-assistant.js has a copy of both.
+export function titleFrom(question: string): string {
+  const flat = question.replace(/\s+/g, ' ').trim();
+  const cut = flat.search(/[.?!](\s|$)|\s[—–-]\s/);
+  const first = cut > 0 ? flat.slice(0, cut + (flat[cut] === '?' ? 1 : 0)) : flat;
+  let title = (weakTitle(first) ? flat : first).replace(/[\s.,;:!—–-]+$/, '');
+  if (title.length > 60) title = title.slice(0, 60).replace(/\s+\S*$/, '').replace(/[\s.,;:!—–-]+$/, '') + '…';
+  return title || 'New chat';
+}
+
+// Too little to tell one chat from another: "hi", "hello there", "thanks".
+export function weakTitle(title: string): boolean {
+  return title.trim().split(/\s+/).filter(Boolean).length < 3 && title.length < 16;
 }
 
 // ── Who is asking ────────────────────────────────────────────
@@ -198,37 +267,77 @@ function database(env: Env, http: Fetch) {
   const uid = (id: string) => encodeURIComponent(id);
 
   return {
-    async usedToday(userId: string): Promise<number> {
-      const day = new Date().toISOString().slice(0, 10);
-      const rows = await (await call(`/ai_usage?select=messages&user_id=eq.${uid(userId)}&day=eq.${day}`)).json();
-      return rows?.[0]?.messages ?? 0;
+    // The conversation, if it is still there and is theirs.
+    async chat(userId: string, chatId: string): Promise<Chat | null> {
+      const rows = await (await call(`/ai_chats?select=${CHAT_FIELDS}&id=eq.${uid(chatId)}` +
+        `&user_id=eq.${uid(userId)}`)).json();
+      return rows?.[0] ?? null;
     },
 
-    async history(userId: string): Promise<Stored[]> {
-      const rows = await (await call(`/ai_chat_messages?select=role,content&user_id=eq.${uid(userId)}` +
+    // One message from today's allowance: the new count, or -1 if none is left.
+    async take(userId: string, day: string, limit: number): Promise<number> {
+      const used = await (await call('/rpc/ai_take_message', {
+        method: 'POST', body: JSON.stringify({ p_user: userId, p_day: day, p_limit: limit }),
+      })).json();
+      if (typeof used !== 'number') throw new Error(`ai_take_message returned ${JSON.stringify(used)}`);
+      return used;
+    },
+
+    async giveBack(userId: string, day: string) {
+      await call('/rpc/ai_return_message', {
+        method: 'POST', body: JSON.stringify({ p_user: userId, p_day: day }),
+      });
+    },
+
+    async history(chatId: string): Promise<Stored[]> {
+      const rows = await (await call(`/ai_chat_messages?select=role,content&chat_id=eq.${uid(chatId)}` +
         `&order=created_at.desc&limit=${HISTORY_MESSAGES}`)).json();
       return (rows || []).reverse();
     },
 
     // Both sides are written together, and only once the answer is complete,
-    // so a failed question leaves nothing half-said in the history. The times
-    // are set here because a single insert gives every row the same now().
-    async save(userId: string, question: string, askedAt: string, answer: string, model: string) {
-      await call('/ai_chat_messages', {
+    // so a failed question leaves nothing half-said in the history — and a new
+    // conversation is only started once it has something in it. The times are
+    // set here because a single insert gives every row the same now(). Returns
+    // the conversation as it now stands.
+    async save(userId: string, chat: Chat | null, question: string, askedAt: string,
+               answer: string, model: string): Promise<Chat> {
+      const now = new Date().toISOString();
+      const row: Chat = chat ?? (await (await call(`/ai_chats?select=${CHAT_FIELDS}`, {
         method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify([
-          { user_id: userId, role: 'user', content: question, created_at: askedAt },
-          { user_id: userId, role: 'assistant', content: answer, model, created_at: new Date().toISOString() },
-        ]),
-      });
-    },
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ user_id: userId, title: titleFrom(question), created_at: askedAt, updated_at: now }),
+      })).json())[0];
 
-    async count(userId: string): Promise<number> {
-      const used = await (await call('/rpc/ai_count_message', {
-        method: 'POST', body: JSON.stringify({ p_user: userId }),
+      try {
+        // A bulk insert needs the same keys on every row, so the question
+        // carries an empty model too.
+        await call('/ai_chat_messages', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify([
+            { user_id: userId, chat_id: row.id, role: 'user', content: question, model: null, created_at: askedAt },
+            { user_id: userId, chat_id: row.id, role: 'assistant', content: answer, model, created_at: now },
+          ]),
+        });
+      } catch (e) {
+        // Leave no empty conversation behind.
+        if (!chat) await call(`/ai_chats?id=eq.${uid(row.id)}`, { method: 'DELETE' }).catch(() => {});
+        throw e;
+      }
+      if (!chat) return row;
+
+      // A chat that opened with a bare "hi" takes its name from the first
+      // question that says more — unless its owner has named it.
+      const patch: Partial<Chat> = { updated_at: now };
+      const better = titleFrom(question);
+      if (!chat.named && weakTitle(chat.title) && !weakTitle(better)) patch.title = better;
+      const rows = await (await call(`/ai_chats?id=eq.${uid(chat.id)}&select=${CHAT_FIELDS}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify(patch),
       })).json();
-      return typeof used === 'number' ? used : 0;
+      return rows?.[0] ?? { ...chat, ...patch };
     },
 
     // Models still resting, and until when.
@@ -337,13 +446,15 @@ async function callGemini(payload: unknown, models: string[], apiKey: string, ht
     }
     // A rejected key or an unsupported location fails the same way on every
     // model, so there is no point trying the rest.
+    // What went wrong is in the log above; the person asking only needs to
+    // know it is not something they can fix.
     if (/API[_ ]key/i.test(detail) || res.status === 401 || res.status === 403) {
       return { ok: false, status: 503, code: 'bad_key',
-        message: 'The assistant is not set up correctly: Google rejected the API key.' };
+        message: 'The assistant is not available right now. Try again later.' };
     }
     if (/location is not supported/i.test(detail)) {
       return { ok: false, status: 503, code: 'region',
-        message: 'Google Gemini is not available from the server’s region.' };
+        message: 'The assistant is not available right now. Try again later.' };
     }
   }
   return last;
@@ -351,13 +462,16 @@ async function callGemini(payload: unknown, models: string[], apiKey: string, ht
 
 // ── Streaming the answer back ────────────────────────────────
 // Gemini sends server-sent events, one JSON chunk per line. Only the visible
-// text is passed on; when the stream ends the answer is saved and the browser
-// is told how many questions it has left today.
+// text is passed on; when the stream ends the answer is saved, and the browser
+// is told how many messages it has left today and which conversation now holds
+// them. An answer that never comes — cut off, blocked or empty — calls
+// `abandon`, which gives the message back.
 //
 // Someone who leaves the page mid-answer still gets it: the rest is read and
 // saved regardless, and is waiting in the conversation when they come back.
 export function relay(source: ReadableStream<Uint8Array>,
-                      finish: (answer: string) => Promise<number | null>): ReadableStream<Uint8Array> {
+                      finish: (answer: string) => Promise<Record<string, unknown>>,
+                      abandon: () => Promise<unknown> = async () => {}): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let gone = false;
@@ -407,18 +521,20 @@ export function relay(source: ReadableStream<Uint8Array>,
         take(buffer + decoder.decode());
 
         if (!answer.trim()) {
+          await abandon();
           send({ type: 'error', code: blocked ? 'blocked' : 'empty', message: blocked
-            ? 'Gemini declined to answer that one. Try asking it a different way.'
+            ? 'The assistant can’t help with that one. Try asking it a different way.'
             : 'The assistant came back with nothing. Try again.' });
           return;
         }
 
-        let remaining: number | null = null;
-        try { remaining = await finish(answer); }
+        let extra: Record<string, unknown> = {};
+        try { extra = await finish(answer); }
         catch (e) { console.error('[ai-chat] saving:', (e as Error).message); }
-        send({ type: 'done', remaining });
+        send({ ...extra, type: 'done' });
       } catch (e) {
         console.error('[ai-chat] stream:', (e as Error).message);
+        await abandon();
         send({ type: 'error', code: 'interrupted', message: 'The answer was cut off. Try again.' });
         reader.cancel().catch(() => {});
       } finally {
